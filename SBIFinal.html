@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SBI Bank Statement Analyzer (Optimized)</title>
+    <!-- Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <!-- PapaParse from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Chart.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons from CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .sortable-header {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .sortable-header .sort-icon {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.3;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .sortable-header:hover .sort-icon,
+        .sortable-header.sorted .sort-icon {
+            opacity: 1;
+        }
+        .sortable-header .sort-icon.asc {
+            transform: translateY(-50%) rotate(180deg);
+        }
+        .chart-tab-button {
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            font-weight: 500;
+            background-color: #e5e7eb;
+            color: #4b5563;
+            transition-property: all;
+            transition-duration: 200ms;
+        }
+        .chart-tab-button.active {
+            background-color: #4f46e5;
+            color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        
+        /* Responsive sidebar toggle */
+        #sidebar {
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        @media (max-width: 1024px) {
+            #sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 50;
+                transform: translateX(-100%);
+            }
+            #sidebar.open {
+                transform: translateX(0);
+            }
+            #overlay {
+                display: none;
+            }
+            #overlay.open {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans antialiased text-gray-800">
+
+    <div id="overlay" class="fixed inset-0 bg-gray-900 bg-opacity-50 z-40 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+    <div class="lg:flex min-h-screen">
+        <!-- Sidebar for filters -->
+        <div id="sidebar" class="w-full lg:w-80 bg-white shadow-xl lg:shadow-none p-6 space-y-8 flex-shrink-0 border-r border-gray-200">
+            <div class="flex items-center justify-between lg:block">
+                <h2 class="text-2xl font-bold text-gray-900">Filters</h2>
+                <button onclick="toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div id="filter-controls" class="space-y-4 hidden">
+                <div>
+                    <label for="filter-category" class="block text-sm font-medium text-gray-700">Category</label>
+                    <select id="filter-category" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Categories</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-subcategory" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                    <select id="filter-subcategory" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Sub-Categories</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-type" class="block text-sm font-medium text-gray-700">Transaction Type</label>
+                    <select id="filter-type" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Types</option>
+                        <option value="Credit">Credit</option>
+                        <option value="Debit">Debit</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-year" class="block text-sm font-medium text-gray-700">Year</label>
+                    <select id="filter-year" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Years</option>
+                    </select>
+                </div>
+                 <div>
+                    <button onclick="showAddCategoryModal()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                        Add New Category
+                    </button>
+                </div>
+                <button onclick="clearFilters()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Clear Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Main content area -->
+        <div class="flex-1 p-4 sm:p-8">
+            <div class="container mx-auto max-w-7xl">
+                <!-- Header -->
+                <div class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8">
+                    <div class="flex items-center justify-between">
+                        <h1 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">
+                            SBI Bank Statement Analyzer
+                        </h1>
+                        <button onclick="toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-filter"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                        </button>
+                    </div>
+                    <p class="text-gray-600 text-lg">
+                        Upload your SBI CSV file to expand transaction details into a structured table, visualize your data, and categorize transactions.
+                    </p>
+                    <div class="mt-6 flex flex-col sm:flex-row items-center gap-4">
+                        <label
+                            for="csv-upload"
+                            class="w-full sm:w-auto px-6 py-3 border-2 border-dashed border-indigo-400 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors duration-200 cursor-pointer text-center font-medium"
+                        >
+                            <div class="flex items-center justify-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.36M16 19l-4-4-4 4M12 15v9"/></svg>
+                                <span>Choose or Add SBI CSV file</span>
+                            </div>
+                            <input
+                                id="csv-upload"
+                                type="file"
+                                accept=".csv"
+                                onchange="handleFileUpload(event)"
+                                class="hidden"
+                            />
+                        </label>
+                        <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-center">
+                             <span id="file-name" class="text-gray-500 text-sm sm:text-base hidden items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 12h8"/><path d="M8 16h8"/><path d="M8 20h5"/></svg>
+                                <span id="file-name-text"></span>
+                            </span>
+                            <button
+                                onclick="resetApp()"
+                                class="w-full sm:w-auto px-4 py-2 border border-red-400 text-sm font-medium rounded-md text-red-600 bg-red-50 hover:bg-red-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                            >
+                                <div class="flex items-center justify-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                                    <span>Reset App</span>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading and Error states -->
+                <div id="loading" class="text-center p-8 hidden">
+                    <div class="flex items-center justify-center mb-4">
+                        <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <p id="loading-text" class="text-indigo-600 font-medium text-lg">Processing your file...</p>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300 ease-in-out" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div id="error" class="bg-red-100 text-red-700 p-4 rounded-xl flex items-center gap-2 hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                    <p id="error-text"></p>
+                </div>
+
+                <!-- Charts and Controls -->
+                <div id="charts-and-controls-container" class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8 hidden">
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">Financial Visualizations</h2>
+                    <!-- Chart Tabs -->
+                    <div class="flex flex-wrap gap-2 sm:gap-4 mb-6">
+                        <button class="chart-tab-button active" onclick="showChart('category-breakdown', this)">Category Breakdown</button>
+                        <button class="chart-tab-button" onclick="showChart('credit-debit', this)">Credit vs Debit</button>
+                        <button class="chart-tab-button" onclick="showChart('category-utilization', this)">Category Utilization</button>
+                        <button class="chart-tab-button" onclick="showChart('subcategory-utilization', this)">Sub-Category Utilization</button>
+                        <button class="chart-tab-button" onclick="showChart('vpa-utilization', this)">VPA Utilization</button>
+                    </div>
+
+                    <!-- Chart Containers -->
+                    <div id="chart-category-breakdown" class="chart-container">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                    
+                    <div id="chart-credit-debit" class="chart-container hidden">
+                        <canvas id="creditDebitChart"></canvas>
+                    </div>
+
+                    <div id="chart-category-utilization" class="chart-container hidden">
+                        <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                            <div>
+                                <label for="category-utilization-time-frame" class="block text-sm font-medium text-gray-700 mb-1">Time Frame</label>
+                                <select id="category-utilization-time-frame" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderCategoryUtilizationChart()">
+                                    <option value="month">Monthly</option>
+                                    <option value="day">Daily</option>
+                                    <option value="year">Yearly</option>
+                                </select>
+                            </div>
+                            <div class="flex-grow">
+                                <label for="category-utilization-filter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Category</label>
+                                <select id="category-utilization-filter" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderCategoryUtilizationChart()">
+                                    <option value="All">All Categories</option>
+                                </select>
+                            </div>
+                        </div>
+                        <canvas id="categoryUtilizationChart"></canvas>
+                    </div>
+
+                    <div id="chart-subcategory-utilization" class="chart-container hidden">
+                        <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                            <div>
+                                <label for="subcategory-utilization-time-frame" class="block text-sm font-medium text-gray-700 mb-1">Time Frame</label>
+                                <select id="subcategory-utilization-time-frame" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderSubCategoryUtilizationChart()">
+                                    <option value="month">Monthly</option>
+                                    <option value="day">Daily</option>
+                                    <option value="year">Yearly</option>
+                                </select>
+                            </div>
+                            <div class="flex-grow">
+                                <label for="subcategory-utilization-filter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Sub-Category</label>
+                                <select id="subcategory-utilization-filter" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderSubCategoryUtilizationChart()">
+                                    <option value="All">All Sub-Categories</option>
+                                </select>
+                            </div>
+                        </div>
+                        <canvas id="subcategoryUtilizationChart"></canvas>
+                    </div>
+                    
+                    <div id="chart-vpa-utilization" class="chart-container hidden">
+                        <canvas id="vpaUtilizationChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Data Table and Search -->
+                <div id="data-container" class="bg-white shadow-xl rounded-2xl overflow-hidden hidden">
+                    <div class="p-4 sm:p-6 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                        <h2 class="text-xl sm:text-2xl font-semibold text-gray-900">Transaction Details</h2>
+                        <div class="relative w-full sm:w-1/3">
+                            <input
+                                type="text"
+                                placeholder="Search transactions..."
+                                id="search-input"
+                                onkeyup="filterTransactions()"
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('date')">
+                                        Date
+                                        <span class="sort-icon hidden" data-column="date">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('category')">
+                                        Category
+                                        <span class="sort-icon hidden" data-column="category">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('subCategory')">
+                                        Sub-Category
+                                        <span class="sort-icon hidden" data-column="subCategory">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        VPA
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('name')">
+                                        Sender/Receiver
+                                        <span class="sort-icon hidden" data-column="name">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Transaction ID
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Description
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('debit')">
+                                        Debit
+                                        <span class="sort-icon hidden" data-column="debit">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('credit')">
+                                        Credit
+                                        <span class="sort-icon hidden" data-column="credit">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="transactions-table-body" class="bg-white divide-y divide-gray-200">
+                                <!-- Table rows will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Category Modal -->
+    <div id="add-category-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideAddCategoryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Add New Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="add-category-form">
+                                <div class="mb-4">
+                                    <label for="new-category-name" class="block text-sm font-medium text-gray-700">Category Name</label>
+                                    <input type="text" id="new-category-name" name="categoryName" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mb-4">
+                                    <label for="new-category-keywords" class="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
+                                    <input type="text" id="new-category-keywords" name="keywords" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Add Category
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideAddCategoryModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Map Name to Sub-Category Modal -->
+    <div id="map-name-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideMapNameModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Map Name to Sub-Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="map-name-form">
+                                <div class="mb-4">
+                                    <label for="name-to-map" class="block text-sm font-medium text-gray-700">Sender/Receiver Name</label>
+                                    <input type="text" id="name-to-map" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 bg-gray-100 cursor-not-allowed" readonly>
+                                </div>
+                                <div class="mb-4">
+                                    <label for="subcategory-dropdown" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <select id="subcategory-dropdown" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
+                                            <option value="">Select a sub-category</option>
+                                        </select>
+                                        <button type="button" class="p-2 border border-gray-300 rounded-md shadow-sm text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" onclick="showAddSubCategoryModal()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-plus"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Map Name
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideMapNameModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Sub-Category Modal -->
+    <div id="add-subcategory-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideAddSubCategoryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Add New Sub-Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="add-subcategory-form">
+                                <div class="mb-4">
+                                    <label for="new-subcategory-name" class="block text-sm font-medium text-gray-700">Sub-Category Name</label>
+                                    <input type="text" id="new-subcategory-name" name="subcategoryName" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Add Sub-Category
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideAddSubCategoryModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Summary Modal -->
+    <div id="upload-summary-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideUploadSummaryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100">
+                        <svg class="h-6 w-6 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </div>
+                    <div class="mt-3 text-center sm:mt-5">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            File Upload Complete
+                        </h3>
+                        <div class="mt-2">
+                            <p id="upload-summary-text" class="text-sm text-gray-500"></p>
+                            <!-- NEW: Container for the list of duplicates -->
+                            <div id="duplicates-list-container" class="mt-4 max-h-40 overflow-y-auto border border-gray-200 rounded-md p-2 hidden text-left">
+                                <h4 class="font-semibold text-sm text-gray-800 mb-2">Skipped Duplicates:</h4>
+                                <ul id="duplicates-list" class="list-disc pl-5 text-xs text-gray-600 space-y-1">
+                                    <!-- Duplicate items will be inserted here by JavaScript -->
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-5 sm:mt-6">
+                    <button type="button" class="inline-flex justify-center w-full rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:text-sm" onclick="hideUploadSummaryModal()">
+                        OK
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        let allTransactions = [];
+        let uniqueTransactionSet = new Set();
+        let filteredTransactions = [];
+        let categoryChart, creditDebitChart, categoryUtilizationChart, subcategoryUtilizationChart, vpaUtilizationChart;
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc';
+        let currentActiveChartId = 'category-breakdown';
+        
+        let columnMap = {
+            date: '',
+            description: '',
+            debit: '',
+            credit: '',
+            balance: '' // Added balance
+        };
+        
+        const BATCH_SIZE = 500;
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        let categories = {
+            'UPI Transfer': ['upi/dr/', 'upi/cr/', 'upi~', '~dr~', '~cr~'],
+            'NEFT/IMPS Transfer': ['neft', 'imps'],
+            'Card Payment': ['pos/dr/'],
+            'ATM Withdrawal': ['atm wdl', 'cash wdl'],
+            'Interest': ['int. pd.'],
+            'Cheque Payment': ['chq.paid'],
+            'Bank Charges': ['bank charges', 'gst'],
+            'Salary Credit': ['salary']
+        };
+
+        let subCategories = [];
+        let nameSubcategoryMap = {};
+
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            let color = '#';
+            for (let i = 0; i < 3; i++) {
+                let value = (hash >> (i * 8)) & 0xFF;
+                color += ('00' + value.toString(16)).substr(-2);
+            }
+            return color;
+        }
+        
+        function parseSBIParticulars(particulars, debitAmount, creditAmount) {
+            const parsedDetails = {
+                upiId: 'N/A',
+                transactionType: 'N/A',
+                name: 'N/A',
+                vpa: 'N/A',
+                description: particulars || '',
+                category: 'Other',
+                subCategory: 'N/A'
+            };
+
+            const normalizedParticulars = (particulars || '').toLowerCase();
+            const debitVal = parseAmount(debitAmount);
+            const creditVal = parseAmount(creditAmount);
+
+            if (debitVal > 0) parsedDetails.transactionType = 'Debit';
+            else if (creditVal > 0) parsedDetails.transactionType = 'Credit';
+            else if (normalizedParticulars.includes('~dr~') || normalizedParticulars.includes('/dr/')) parsedDetails.transactionType = 'Debit';
+            else if (normalizedParticulars.includes('~cr~') || normalizedParticulars.includes('/cr/')) parsedDetails.transactionType = 'Credit';
+
+            const upiRegex = /UPI\/(?:DR|CR)\/(\d+)\/([^\/]+)\/([^\/]+)/i;
+            const upiMatch = particulars.match(upiRegex);
+
+            if (upiMatch) {
+                parsedDetails.category = 'UPI Transfer';
+                parsedDetails.upiId = upiMatch[1] || 'N/A';
+                parsedDetails.name = upiMatch[2] || 'N/A';
+                parsedDetails.vpa = upiMatch[3] || 'N/A';
+            } else {
+                for (const category in categories) {
+                    if (category === 'UPI Transfer') continue;
+                    if (categories[category].some(keyword => normalizedParticulars.includes(keyword))) {
+                        parsedDetails.category = category;
+                        break;
+                    }
+                }
+            }
+            
+            if (parsedDetails.name !== 'N/A' && nameSubcategoryMap[parsedDetails.name]) {
+                parsedDetails.subCategory = nameSubcategoryMap[parsedDetails.name];
+            }
+
+            return parsedDetails;
+        }
+
+        function parseAmount(amount) {
+            if (!amount) return 0;
+            const cleanedAmount = String(amount).replace(/,/g, '');
+            const parsed = parseFloat(cleanedAmount);
+            return isNaN(parsed) ? 0 : parsed;
+        }
+
+        function renderTable(data) {
+            const tableBody = document.getElementById('transactions-table-body');
+            
+            if (data.length === 0) {
+                tableBody.innerHTML = `<tr><td colspan="9" class="px-6 py-4 text-center text-sm text-gray-500">No transactions found.</td></tr>`;
+                return;
+            }
+
+            const rowsHtml = data.map(transaction => {
+                const parsedParticulars = transaction.parsed;
+                const transactionTypeClass = parsedParticulars.transactionType === 'Credit' ? 'bg-green-100 text-green-800' :
+                                             parsedParticulars.transactionType === 'Debit' ? 'bg-red-100 text-red-800' :
+                                             'bg-gray-100 text-gray-800';
+                
+                const subCategoryText = parsedParticulars.subCategory !== 'N/A' ?
+                    `<span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">${parsedParticulars.subCategory}</span>` : '-';
+                
+                const nameCell = parsedParticulars.name !== 'N/A' ? 
+                    `<button onclick="showMapNameModal('${parsedParticulars.name}')" class="text-blue-600 hover:text-blue-800 font-medium">${parsedParticulars.name}</button>` : 'N/A';
+                
+                const debitValue = transaction[columnMap.debit] || '-';
+                const creditValue = transaction[columnMap.credit] || '-';
+
+                return `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${transaction[columnMap.date]}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold ${transactionTypeClass}">
+                                ${parsedParticulars.category} (${parsedParticulars.transactionType || 'N/A'})
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${subCategoryText}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${parsedParticulars.vpa || '-'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${nameCell}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${parsedParticulars.upiId || '-'}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600">${parsedParticulars.description}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-red-600 font-medium">${debitValue}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-medium">${creditValue}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            tableBody.innerHTML = rowsHtml;
+        }
+
+        function sortTable(columnKey) {
+            if (currentSortColumn === columnKey) {
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = columnKey;
+                currentSortDirection = 'asc';
+            }
+
+            document.querySelectorAll('.sortable-header .sort-icon').forEach(icon => icon.classList.add('hidden'));
+            document.querySelectorAll('.sortable-header').forEach(header => header.classList.remove('sorted'));
+
+            const currentIcon = document.querySelector(`.sort-icon[data-column="${columnKey}"]`);
+            if (currentIcon) {
+                currentIcon.classList.remove('hidden');
+                document.querySelector(`.sortable-header[onclick*="'${columnKey}'"]`).classList.add('sorted');
+                currentIcon.classList.toggle('asc', currentSortDirection === 'desc');
+            }
+
+            filteredTransactions.sort((a, b) => {
+                let aValue, bValue;
+                
+                if (['category', 'subCategory', 'name'].includes(columnKey)) {
+                    aValue = a.parsed[columnKey];
+                    bValue = b.parsed[columnKey];
+                } else {
+                    const mappedColumn = columnMap[columnKey];
+                    aValue = a[mappedColumn];
+                    bValue = b[mappedColumn];
+                }
+
+                if (columnKey === 'date') {
+                    aValue = formatDate(aValue).getTime();
+                    bValue = formatDate(bValue).getTime();
+                } else if (columnKey === 'debit' || columnKey === 'credit') {
+                    aValue = parseAmount(aValue);
+                    bValue = parseAmount(bValue);
+                }
+                
+                const valA = aValue || 0;
+                const valB = bValue || 0;
+
+                if (typeof valA === 'string' && typeof valB === 'string') {
+                     return currentSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                } else {
+                    return currentSortDirection === 'asc' ? valA - valB : valB - valA;
+                }
+            });
+
+            renderTable(filteredTransactions);
+        }
+
+        function renderCreditDebitChart(data) {
+            if (creditDebitChart) creditDebitChart.destroy();
+
+            const totals = data.reduce((acc, transaction) => {
+                acc.debit += parseAmount(transaction[columnMap.debit]);
+                acc.credit += parseAmount(transaction[columnMap.credit]);
+                return acc;
+            }, { debit: 0, credit: 0 });
+
+            const ctx = document.getElementById('creditDebitChart').getContext('2d');
+            creditDebitChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Credit', 'Debit'],
+                    datasets: [{
+                        label: 'Total Amount',
+                        data: [totals.credit.toFixed(2), totals.debit.toFixed(2)],
+                        backgroundColor: ['rgb(34, 197, 94)', 'rgb(239, 68, 68)'],
+                        borderColor: ['rgb(22, 163, 74)', 'rgb(220, 38, 38)'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false }, title: { display: true, text: 'Total Credit vs Debit' } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+        
+        function renderCategoryBreakdownChart(data) {
+            if (categoryChart) categoryChart.destroy();
+            
+            const categoryData = data.reduce((acc, transaction) => {
+                const category = transaction.parsed.category;
+                if (!acc[category]) acc[category] = { count: 0, totalAmount: 0 };
+                acc[category].count++;
+                const amount = parseAmount(transaction[columnMap.debit]) || parseAmount(transaction[columnMap.credit]);
+                acc[category].totalAmount += amount;
+                return acc;
+            }, {});
+
+            const labels = Object.keys(categoryData);
+            const counts = Object.values(categoryData).map(item => item.count);
+            const amounts = Object.values(categoryData).map(item => item.totalAmount);
+            const backgroundColors = labels.map(label => stringToColor(label));
+
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+            categoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{ data: counts, backgroundColor: backgroundColors, hoverOffset: 4 }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: 'Transaction Categories Breakdown' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const count = context.raw;
+                                    const amount = amounts[context.dataIndex];
+                                    return `${label}: ${count} transactions, ₹${amount.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function aggregateDataByTimeAndGroup(data, groupKey, timeFrame, filterValue) {
+            const aggregated = {};
+            const uniqueDates = [...new Set(data.map(t => formatDate(t[columnMap.date])))].filter(d => !isNaN(d.getTime())).sort((a, b) => a - b);
+            
+            let allLabels = [];
+            if (uniqueDates.length > 0) {
+                let start = new Date(uniqueDates[0]);
+                let end = new Date(uniqueDates[uniqueDates.length - 1]);
+                
+                if (timeFrame === 'month') {
+                    start.setDate(1);
+                    while (start <= end) {
+                        allLabels.push(monthNames[start.getMonth()] + ' ' + start.getFullYear());
+                        start.setMonth(start.getMonth() + 1);
+                    }
+                } else if (timeFrame === 'day') {
+                    while (start <= end) {
+                        allLabels.push(start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0'));
+                        start.setDate(start.getDate() + 1);
+                    }
+                } else if (timeFrame === 'year') {
+                    start.setMonth(0, 1);
+                    while (start.getFullYear() <= end.getFullYear()) {
+                        allLabels.push(start.getFullYear().toString());
+                        start.setFullYear(start.getFullYear() + 1);
+                    }
+                }
+            }
+            
+            allLabels.forEach(label => { aggregated[label] = { debit: 0, credit: 0 }; });
+
+            data.forEach(transaction => {
+                const dateObj = formatDate(transaction[columnMap.date]);
+                if (isNaN(dateObj.getTime())) return;
+                
+                let dateKey;
+                if (timeFrame === 'month') dateKey = monthNames[dateObj.getMonth()] + ' ' + dateObj.getFullYear();
+                else if (timeFrame === 'day') dateKey = dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0');
+                else if (timeFrame === 'year') dateKey = dateObj.getFullYear().toString();
+
+                const group = transaction.parsed[groupKey];
+                
+                if (filterValue === 'All' || group === filterValue) {
+                    if(aggregated[dateKey]){
+                        aggregated[dateKey].debit += parseAmount(transaction[columnMap.debit]);
+                        aggregated[dateKey].credit += parseAmount(transaction[columnMap.credit]);
+                    }
+                }
+            });
+            
+            const labels = Object.keys(aggregated).sort((a, b) => {
+                if (timeFrame === 'month') {
+                    const [monthA, yearA] = a.split(' ');
+                    const [monthB, yearB] = b.split(' ');
+                    return new Date(`${monthA} 1, ${yearA}`) - new Date(`${monthB} 1, ${yearB}`);
+                }
+                return a.localeCompare(b);
+            });
+            
+            const debitData = labels.map(label => aggregated[label].debit.toFixed(2));
+            const creditData = labels.map(label => aggregated[label].credit.toFixed(2));
+
+            return { labels, debit: debitData, credit: creditData };
+        }
+        
+        function renderUtilizationCharts() {
+            renderCategoryUtilizationChart();
+            renderSubCategoryUtilizationChart();
+            renderVpaUtilizationChart();
+        }
+
+        function renderCategoryUtilizationChart() {
+            if (categoryUtilizationChart) categoryUtilizationChart.destroy();
+            const timeFrame = document.getElementById('category-utilization-time-frame').value;
+            const filterCategory = document.getElementById('category-utilization-filter').value;
+            let dataToProcess = (filterCategory === 'All') ? filteredTransactions : filteredTransactions.filter(t => t.parsed.category === filterCategory);
+            const aggregatedData = aggregateDataByTimeAndGroup(dataToProcess, 'category', timeFrame, filterCategory);
+            const ctx = document.getElementById('categoryUtilizationChart').getContext('2d');
+            categoryUtilizationChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: aggregatedData.labels,
+                    datasets: [
+                        { label: 'Debit', data: aggregatedData.debit, backgroundColor: 'rgb(239, 68, 68)' },
+                        { label: 'Credit', data: aggregatedData.credit, backgroundColor: 'rgb(34, 197, 94)' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { title: { display: true, text: `Utilization by Category (${timeFrame.charAt(0).toUpperCase() + timeFrame.slice(1)}ly)` } },
+                    scales: { x: { stacked: true }, y: { stacked: true } }
+                }
+            });
+        }
+
+        function renderSubCategoryUtilizationChart() {
+            if (subcategoryUtilizationChart) subcategoryUtilizationChart.destroy();
+            const timeFrame = document.getElementById('subcategory-utilization-time-frame').value;
+            const filterSubCategory = document.getElementById('subcategory-utilization-filter').value;
+            let dataToProcess = (filterSubCategory === 'All') ? filteredTransactions : filteredTransactions.filter(t => t.parsed.subCategory === filterSubCategory);
+            const aggregatedData = aggregateDataByTimeAndGroup(dataToProcess, 'subCategory', timeFrame, filterSubCategory);
+            const ctx = document.getElementById('subcategoryUtilizationChart').getContext('2d');
+            subcategoryUtilizationChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: aggregatedData.labels,
+                    datasets: [
+                        { label: 'Debit', data: aggregatedData.debit, backgroundColor: 'rgb(239, 68, 68)' },
+                        { label: 'Credit', data: aggregatedData.credit, backgroundColor: 'rgb(34, 197, 94)' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { title: { display: true, text: `Utilization by Sub-Category (${timeFrame.charAt(0).toUpperCase() + timeFrame.slice(1)}ly)` } },
+                    scales: { x: { stacked: true }, y: { stacked: true } }
+                }
+            });
+        }
+        
+        function renderVpaUtilizationChart() {
+            if (vpaUtilizationChart) vpaUtilizationChart.destroy();
+            const vpaData = filteredTransactions.filter(t => t.parsed.vpa !== 'N/A').reduce((acc, transaction) => {
+                const vpa = transaction.parsed.vpa;
+                if (!acc[vpa]) acc[vpa] = { debit: 0, credit: 0 };
+                acc[vpa].debit += parseAmount(transaction[columnMap.debit]);
+                acc[vpa].credit += parseAmount(transaction[columnMap.credit]);
+                return acc;
+            }, {});
+
+            const labels = Object.keys(vpaData);
+            const debitData = labels.map(vpa => vpaData[vpa].debit.toFixed(2));
+            const creditData = labels.map(vpa => vpaData[vpa].credit.toFixed(2));
+
+            const ctx = document.getElementById('vpaUtilizationChart').getContext('2d');
+            vpaUtilizationChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Total Debit', data: debitData, backgroundColor: 'rgb(239, 68, 68)' },
+                        { label: 'Total Credit', data: creditData, backgroundColor: 'rgb(34, 197, 94)' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    indexAxis: 'y',
+                    plugins: { title: { display: true, text: 'Total Utilization by VPA' } },
+                    scales: { x: { stacked: true, beginAtZero: true }, y: { stacked: true } }
+                }
+            });
+        }
+        
+        function formatDate(dateString) {
+            if (dateString instanceof Date) return dateString;
+            if (!dateString) return new Date(NaN);
+            try {
+                const parts = dateString.split('-');
+                if (parts.length === 3) {
+                    const day = parseInt(parts[0], 10);
+                    let month;
+                    let year = parseInt(parts[2], 10);
+                    if (isNaN(parseInt(parts[1], 10))) {
+                        month = monthNames.findIndex(m => m.toLowerCase() === parts[1].toLowerCase());
+                        if(year < 100) year += 2000;
+                    } else {
+                        month = parseInt(parts[1], 10) - 1;
+                    }
+                    const newDate = new Date(year, month, day);
+                    return isNaN(newDate.getTime()) ? new Date(NaN) : newDate;
+                }
+                return new Date(dateString);
+            } catch (error) {
+                return new Date(NaN);
+            }
+        }
+
+        function populateCategoryDropdowns() {
+            const sidebarFilter = document.getElementById('filter-category');
+            const chartFilter = document.getElementById('category-utilization-filter');
+            sidebarFilter.innerHTML = '<option value="All">All Categories</option>';
+            chartFilter.innerHTML = '<option value="All">All Categories</option>';
+            const uniqueCategories = [...new Set(allTransactions.map(t => t.parsed.category))].sort();
+            uniqueCategories.forEach(category => {
+                sidebarFilter.innerHTML += `<option value="${category}">${category}</option>`;
+                chartFilter.innerHTML += `<option value="${category}">${category}</option>`;
+            });
+        }
+        
+        function populateSubCategoryDropdowns() {
+            const sidebarFilter = document.getElementById('filter-subcategory');
+            const chartFilter = document.getElementById('subcategory-utilization-filter');
+            sidebarFilter.innerHTML = '<option value="All">All Sub-Categories</option>';
+            chartFilter.innerHTML = '<option value="All">All Sub-Categories</option>';
+            const uniqueSubCategories = [...new Set(allTransactions.map(t => t.parsed.subCategory))].filter(sc => sc !== 'N/A').sort();
+            uniqueSubCategories.forEach(subCategory => {
+                sidebarFilter.innerHTML += `<option value="${subCategory}">${subCategory}</option>`;
+                chartFilter.innerHTML += `<option value="${subCategory}">${subCategory}</option>`;
+            });
+            populateSubCategoryDropdown();
+        }
+        
+        function populateYearDropdown() {
+            const yearFilter = document.getElementById('filter-year');
+            yearFilter.innerHTML = '<option value="All">All Years</option>';
+            const uniqueYears = [...new Set(allTransactions.map(t => formatDate(t[columnMap.date]).getFullYear()))].filter(y => !isNaN(y)).sort();
+            uniqueYears.forEach(year => {
+                yearFilter.innerHTML += `<option value="${year}">${year}</option>`;
+            });
+        }
+        
+        function populateSubCategoryDropdown() {
+             const subCategoryDropdown = document.getElementById('subcategory-dropdown');
+             subCategoryDropdown.innerHTML = '<option value="">Select a sub-category</option>';
+             subCategories.sort().forEach(sc => {
+                subCategoryDropdown.innerHTML += `<option value="${sc}">${sc}</option>`;
+            });
+        }
+        
+        function findColumnHeaders(fields) {
+            const fieldMap = {
+                date: ['date', 'txn date'],
+                description: ['description', 'particulars', 'narration'],
+                debit: ['debit', 'withdrawal', 'dr'],
+                credit: ['credit', 'deposit', 'cr'],
+                balance: ['balance', 'running balance']
+            };
+
+            for (const key in fieldMap) {
+                const lowerCaseFields = fields.map(f => f.toLowerCase().trim());
+                const foundField = fieldMap[key].find(keyword => lowerCaseFields.includes(keyword));
+                if (foundField) {
+                    columnMap[key] = fields[lowerCaseFields.indexOf(foundField)];
+                }
+            }
+
+            return columnMap.date && columnMap.description && columnMap.debit && columnMap.credit;
+        }
+
+        function handleFileUpload(event) {
+            const fileInput = event.target;
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            document.getElementById('file-name-text').innerText = file.name;
+            document.getElementById('file-name').classList.remove('hidden');
+            showLoading(true, `Reading and processing ${file.name}...`);
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                worker: true,
+                complete: (results) => {
+                    if (results.errors.length > 0) {
+                        showLoading(false);
+                        showError('Error parsing the file. Please check the file format.');
+                        fileInput.value = null;
+                        return;
+                    }
+
+                    if (allTransactions.length === 0) {
+                        if (!findColumnHeaders(results.meta.fields)) {
+                            showLoading(false);
+                            showError('Could not auto-detect required columns (Date, Description, Debit, Credit). Please check your CSV file headers.');
+                            fileInput.value = null;
+                            return;
+                        }
+                    }
+                    
+                    const newUniqueTransactions = [];
+                    const duplicatesFound = [];
+                    const totalRows = results.data.length;
+                    
+                    function processChunk(startIndex) {
+                        const endIndex = Math.min(startIndex + BATCH_SIZE, totalRows);
+                        for (let i = startIndex; i < endIndex; i++) {
+                            const row = results.data[i];
+                            const date = row[columnMap.date];
+                            const description = row[columnMap.description];
+                            const debit = row[columnMap.debit] || '0';
+                            const credit = row[columnMap.credit] || '0';
+                            const balance = row[columnMap.balance] || '0';
+
+                            if (date && description) {
+                                const uniqueKey = `${date}-${description}-${debit}-${credit}-${balance}`;
+                                if (uniqueTransactionSet.has(uniqueKey)) {
+                                    duplicatesFound.push(row);
+                                } else {
+                                    uniqueTransactionSet.add(uniqueKey);
+                                    newUniqueTransactions.push({
+                                        ...row,
+                                        parsed: parseSBIParticulars(description, debit, credit)
+                                    });
+                                }
+                            }
+                        }
+                        
+                        const progress = (endIndex / totalRows) * 100;
+                        document.getElementById('progress-bar').style.width = `${progress}%`;
+                        document.getElementById('loading-text').innerText = `Processed ${endIndex} of ${totalRows} rows...`;
+
+                        if (endIndex < totalRows) {
+                            setTimeout(() => processChunk(endIndex), 0);
+                        } else {
+                            allTransactions.push(...newUniqueTransactions);
+                            allTransactions.sort((a, b) => formatDate(b[columnMap.date]) - formatDate(a[columnMap.date]));
+                            
+                            filterTransactions(); 
+                            
+                            populateCategoryDropdowns();
+                            populateSubCategoryDropdowns();
+                            populateYearDropdown();
+                            
+                            showLoading(false);
+                            document.getElementById('data-container').classList.remove('hidden');
+                            document.getElementById('charts-and-controls-container').classList.remove('hidden');
+                            document.getElementById('filter-controls').classList.remove('hidden');
+                            
+                            showUploadSummaryModal(newUniqueTransactions.length, duplicatesFound);
+                            
+                            fileInput.value = null;
+                        }
+                    }
+
+                    processChunk(0);
+                },
+                error: (err) => {
+                    showLoading(false);
+                    showError('An error occurred during file processing.');
+                    fileInput.value = null;
+                }
+            });
+        }
+
+        function filterTransactions() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const filterCategory = document.getElementById('filter-category').value;
+            const filterSubCategory = document.getElementById('filter-subcategory').value;
+            const filterType = document.getElementById('filter-type').value;
+            const filterYear = document.getElementById('filter-year').value;
+            
+            filteredTransactions = allTransactions.filter(transaction => {
+                const passesSearch = Object.values(transaction).some(value =>
+                    String(value).toLowerCase().includes(searchTerm)
+                ) || Object.values(transaction.parsed).some(value =>
+                    String(value).toLowerCase().includes(searchTerm)
+                );
+
+                const passesCategory = filterCategory === 'All' || transaction.parsed.category === filterCategory;
+                const passesSubCategory = filterSubCategory === 'All' || transaction.parsed.subCategory === filterSubCategory;
+                const passesType = filterType === 'All' || transaction.parsed.transactionType === filterType;
+                
+                let passesYear = true;
+                if (filterYear !== 'All') {
+                    const transactionYear = formatDate(transaction[columnMap.date]).getFullYear();
+                    passesYear = !isNaN(transactionYear) && transactionYear.toString() === filterYear;
+                }
+
+                return passesSearch && passesCategory && passesSubCategory && passesType && passesYear;
+            });
+
+            renderTable(filteredTransactions);
+            showChart(currentActiveChartId, document.querySelector(`.chart-tab-button.active`));
+        }
+        
+        function clearFilters() {
+            document.getElementById('search-input').value = '';
+            document.getElementById('filter-category').value = 'All';
+            document.getElementById('filter-subcategory').value = 'All';
+            document.getElementById('filter-type').value = 'All';
+            document.getElementById('filter-year').value = 'All';
+            filterTransactions();
+        }
+
+        function resetApp() {
+            allTransactions = [];
+            uniqueTransactionSet = new Set();
+            filteredTransactions = [];
+            nameSubcategoryMap = {};
+            subCategories = [];
+            columnMap = { date: '', description: '', debit: '', credit: '', balance: '' };
+            document.getElementById('csv-upload').value = null;
+            document.getElementById('file-name').classList.add('hidden');
+            document.getElementById('data-container').classList.add('hidden');
+            document.getElementById('charts-and-controls-container').classList.add('hidden');
+            document.getElementById('filter-controls').classList.add('hidden');
+            document.getElementById('search-input').value = '';
+            hideError();
+            if (categoryChart) categoryChart.destroy();
+            if (creditDebitChart) creditDebitChart.destroy();
+            if (categoryUtilizationChart) categoryUtilizationChart.destroy();
+            if (subcategoryUtilizationChart) subcategoryUtilizationChart.destroy();
+            if (vpaUtilizationChart) vpaUtilizationChart.destroy();
+        }
+
+        function showLoading(show, text = 'Processing your file...') {
+            const loadingElement = document.getElementById('loading');
+            document.getElementById('loading-text').innerText = text;
+            loadingElement.classList.toggle('hidden', !show);
+            if(show) document.getElementById('progress-bar').style.width = '0%';
+        }
+        
+        function showError(message) {
+            const errorElement = document.getElementById('error');
+            document.getElementById('error-text').innerText = message;
+            errorElement.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('error').classList.add('hidden');
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('overlay').classList.toggle('open');
+        }
+
+        function showAddCategoryModal() { document.getElementById('add-category-modal').classList.remove('hidden'); }
+        function hideAddCategoryModal() { document.getElementById('add-category-modal').classList.add('hidden'); document.getElementById('add-category-form').reset(); }
+        function showAddSubCategoryModal() { document.getElementById('add-subcategory-modal').classList.remove('hidden'); }
+        function hideAddSubCategoryModal() { document.getElementById('add-subcategory-modal').classList.add('hidden'); document.getElementById('add-subcategory-form').reset(); }
+        
+        function showMapNameModal(name) { 
+            document.getElementById('name-to-map').value = name; 
+            populateSubCategoryDropdown(); 
+            document.getElementById('map-name-modal').classList.remove('hidden'); 
+        }
+        function hideMapNameModal() { 
+            document.getElementById('map-name-modal').classList.add('hidden'); 
+            document.getElementById('map-name-form').reset(); 
+        }
+
+        function showUploadSummaryModal(newCount, duplicates) {
+            const summaryText = `Found and skipped ${duplicates.length} duplicate transactions. Added ${newCount} new unique transactions.`;
+            document.getElementById('upload-summary-text').innerText = summaryText;
+
+            const duplicatesContainer = document.getElementById('duplicates-list-container');
+            const duplicatesList = document.getElementById('duplicates-list');
+
+            if (duplicates.length > 0) {
+                duplicatesList.innerHTML = duplicates.map(dup => 
+                    `<li><strong>${dup[columnMap.date]}:</strong> ${dup[columnMap.description].substring(0, 50)}...</li>`
+                ).join('');
+                duplicatesContainer.classList.remove('hidden');
+            } else {
+                duplicatesList.innerHTML = '';
+                duplicatesContainer.classList.add('hidden');
+            }
+
+            document.getElementById('upload-summary-modal').classList.remove('hidden');
+        }
+
+        function hideUploadSummaryModal() {
+            document.getElementById('upload-summary-modal').classList.add('hidden');
+            document.getElementById('duplicates-list-container').classList.add('hidden');
+            document.getElementById('duplicates-list').innerHTML = '';
+        }
+        
+        function showChart(chartId, button) {
+            if(!button) return;
+            
+            document.querySelectorAll('.chart-container').forEach(c => c.classList.add('hidden'));
+            document.querySelectorAll('.chart-tab-button').forEach(b => b.classList.remove('active'));
+
+            document.getElementById(`chart-${chartId}`).classList.remove('hidden');
+            button.classList.add('active');
+            currentActiveChartId = chartId;
+
+            if (filteredTransactions.length > 0) {
+                switch(chartId) {
+                    case 'category-breakdown': renderCategoryBreakdownChart(filteredTransactions); break;
+                    case 'credit-debit': renderCreditDebitChart(filteredTransactions); break;
+                    case 'category-utilization': renderCategoryUtilizationChart(); break;
+                    case 'subcategory-utilization': renderSubCategoryUtilizationChart(); break;
+                    case 'vpa-utilization': renderVpaUtilizationChart(); break;
+                }
+            }
+        }
+
+        document.getElementById('add-category-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const categoryName = document.getElementById('new-category-name').value;
+            const keywords = document.getElementById('new-category-keywords').value.split(',').map(k => k.trim().toLowerCase());
+
+            if (categoryName && keywords.length > 0 && keywords[0] !== '') {
+                categories[categoryName] = keywords;
+                allTransactions.forEach(t => {
+                    if (t.parsed.category === 'Other') {
+                        t.parsed = parseSBIParticulars(t[columnMap.description], t[columnMap.debit], t[columnMap.credit]);
+                    }
+                });
+                populateCategoryDropdowns();
+                filterTransactions();
+                hideAddCategoryModal();
+            } else {
+                showError("Category name and keywords are required.");
+            }
+        });
+        
+        document.getElementById('add-subcategory-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const subCategoryName = document.getElementById('new-subcategory-name').value.trim();
+            if (subCategoryName && !subCategories.includes(subCategoryName)) {
+                subCategories.push(subCategoryName);
+                populateSubCategoryDropdowns();
+                hideAddSubCategoryModal();
+            }
+        });
+        
+        document.getElementById('map-name-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const name = document.getElementById('name-to-map').value;
+            const subCategory = document.getElementById('subcategory-dropdown').value;
+            
+            if (name && subCategory) {
+                nameSubcategoryMap[name] = subCategory;
+                allTransactions.forEach(t => {
+                    if (t.parsed.name === name) t.parsed.subCategory = subCategory;
+                });
+                populateSubCategoryDropdowns();
+                filterTransactions();
+                hideMapNameModal();
+            }
+        });
+
+        window.addEventListener('load', () => {
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

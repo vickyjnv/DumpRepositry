@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement Analyzer</title>
+    <!-- Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <!-- PapaParse from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Chart.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons from CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .sortable-header {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .sortable-header .sort-icon {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.3;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .sortable-header:hover .sort-icon,
+        .sortable-header.sorted .sort-icon {
+            opacity: 1;
+        }
+        .sortable-header .sort-icon.asc {
+            transform: translateY(-50%) rotate(180deg);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans antialiased text-gray-800">
+
+    <div class="container mx-auto max-w-7xl">
+        <!-- Header -->
+        <div class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">
+                Post Office Bank Statement Analyzer
+            </h1>
+            <p class="text-gray-600 text-lg">
+                Upload your CSV file to expand transaction details into a structured table, visualize your data, and categorize transactions.
+            </p>
+            <div class="mt-6 flex flex-col sm:flex-row items-center gap-4">
+                <label
+                    for="csv-upload"
+                    class="w-full sm:w-auto px-6 py-3 border-2 border-dashed border-indigo-400 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors duration-200 cursor-pointer text-center font-medium"
+                >
+                    <div class="flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.36M16 19l-4-4-4 4M12 15v9"/></svg>
+                        <span>Choose a CSV file</span>
+                    </div>
+                    <input
+                        id="csv-upload"
+                        type="file"
+                        accept=".csv"
+                        onchange="handleFileUpload(event)"
+                        class="hidden"
+                    />
+                </label>
+                <span id="file-name" class="text-gray-500 text-sm sm:text-base hidden items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 12h8"/><path d="M8 16h8"/><path d="M8 20h5"/></svg>
+                    <span id="file-name-text"></span>
+                    <button
+                        onclick="resetApp()"
+                        class="text-red-500 hover:text-red-700 transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                    </button>
+                </span>
+            </div>
+        </div>
+
+        <!-- Loading and Error states -->
+        <div id="loading" class="text-center p-8 text-indigo-600 hidden">
+            <p>Processing your file...</p>
+        </div>
+        <div id="error" class="bg-red-100 text-red-700 p-4 rounded-xl items-center gap-2 hidden">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+            <p id="error-text"></p>
+        </div>
+
+        <!-- Charts and Controls -->
+        <div id="charts-and-controls-container" class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8 hidden">
+            <h2 class="text-xl sm:text-2xl font-semibold text-gray-900 mb-4">Financial Overview</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Transaction Category Filter -->
+                <div class="p-6 bg-gray-50 rounded-xl shadow-inner">
+                    <label for="category-filter" class="block text-sm font-medium text-gray-700 mb-2">Filter by Category</label>
+                    <select id="category-filter" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" onchange="filterByCategory(this.value)">
+                        <option value="All">All Categories</option>
+                    </select>
+                    <button class="mt-4 w-full px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" onclick="showAddCategoryModal()">
+                        Add New Category
+                    </button>
+                </div>
+                <!-- Doughnut Chart -->
+                <div class="p-4 bg-gray-50 rounded-xl shadow-inner">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Table and Search -->
+        <div id="data-container" class="bg-white shadow-xl rounded-2xl overflow-hidden hidden">
+            <div class="p-4 sm:p-6 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h2 class="text-xl sm:text-2xl font-semibold text-gray-900">Transaction Details</h2>
+                <div class="relative w-full sm:w-1/3">
+                    <input
+                        type="text"
+                        placeholder="Search transactions..."
+                        id="search-input"
+                        onkeyup="filterTransactions()"
+                        class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('DATE')">
+                                Date
+                                <span class="sort-icon hidden" data-column="DATE">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('category')">
+                                Category
+                                <span class="sort-icon hidden" data-column="category">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('subCategory')">
+                                Sub-Category
+                                <span class="sort-icon hidden" data-column="subCategory">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('upiId')">
+                                Transaction ID
+                                <span class="sort-icon hidden" data-column="upiId">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('name')">
+                                Sender/Receiver
+                                <span class="sort-icon hidden" data-column="name">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('vpa')">
+                                VPA
+                                <span class="sort-icon hidden" data-column="vpa">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Description
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('WITHDRWAL')">
+                                Withdrawal
+                                <span class="sort-icon hidden" data-column="WITHDRWAL">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('DEPOSIT')">
+                                Deposit
+                                <span class="sort-icon hidden" data-column="DEPOSIT">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                </span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactions-table-body" class="bg-white divide-y divide-gray-200">
+                        <!-- Table rows will be inserted here by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Category Modal -->
+    <div id="add-category-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideAddCategoryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Add New Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="add-category-form">
+                                <div class="mb-4">
+                                    <label for="new-category-name" class="block text-sm font-medium text-gray-700">Category Name</label>
+                                    <input type="text" id="new-category-name" name="categoryName" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mb-4">
+                                    <label for="new-category-keywords" class="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
+                                    <input type="text" id="new-category-keywords" name="keywords" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Add Category
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideAddCategoryModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Map VPA to Sub-Category Modal -->
+    <div id="map-vpa-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideMapVpaModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Map VPA to Sub-Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="map-vpa-form">
+                                <div class="mb-4">
+                                    <label for="vpa-to-map" class="block text-sm font-medium text-gray-700">VPA</label>
+                                    <input type="text" id="vpa-to-map" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 bg-gray-100 cursor-not-allowed" readonly>
+                                </div>
+                                <div class="mb-4">
+                                    <label for="subcategory-dropdown" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <select id="subcategory-dropdown" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
+                                            <option value="">Select a sub-category</option>
+                                        </select>
+                                        <button type="button" class="p-2 border border-gray-300 rounded-md shadow-sm text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" onclick="showAddSubCategoryModal()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-plus"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Map VPA
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideMapVpaModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Sub-Category Modal -->
+    <div id="add-subcategory-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideAddSubCategoryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Add New Sub-Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="add-subcategory-form">
+                                <div class="mb-4">
+                                    <label for="new-subcategory-name" class="block text-sm font-medium text-gray-700">Sub-Category Name</label>
+                                    <input type="text" id="new-subcategory-name" name="subcategoryName" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Add Sub-Category
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideAddSubCategoryModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        let allTransactions = [];
+        let filteredTransactions = [];
+        let categoryChart;
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc';
+
+        // Pre-defined categories
+        let categories = {
+            'UPI Transaction': ['upi'],
+            'Bank Fee': ['fee', 'charge'],
+            'Initial Deposit': ['initial cash deposit'],
+            'PLI Transaction': ['pli'],
+            'Interest': ['int.pd:']
+        };
+
+        // Sub-categories list
+        let subCategories = [];
+
+        // VPA to sub-category mapping
+        let vpaSubcategoryMap = {};
+
+        const transactionTypeMap = {
+            'CR': 'Credit',
+            'DR': 'Debit',
+            'N/A': 'N/A'
+        };
+        const transactionTypeColors = {
+            'Credit': 'rgb(34, 197, 94)', // green
+            'Debit': 'rgb(239, 68, 68)', // red
+            'N/A': 'rgb(107, 114, 128)' // gray
+        };
+
+        // Function to assign a category based on keywords
+        function getCategory(particulars) {
+            const lowerParticulars = particulars.toLowerCase();
+            for (const category in categories) {
+                if (categories[category].some(keyword => lowerParticulars.includes(keyword))) {
+                    return category;
+                }
+            }
+            return 'Other';
+        }
+
+        // Function to parse the transaction particulars string
+        function parseTransactionParticulars(particulars) {
+            // Normalize delimiters by replacing '/' with '~'
+            const normalizedParticulars = particulars.replace(/\//g, '~');
+            
+            let parsedDetails = {
+                type: 'Other',
+                upiId: 'N/A',
+                transactionType: 'N/A',
+                name: 'N/A',
+                vpa: 'N/A',
+                description: particulars,
+                category: 'Other',
+                subCategory: 'N/A'
+            };
+
+            // Handle various transaction types
+            if (normalizedParticulars.startsWith('UPI~')) {
+                const parts = normalizedParticulars.split('~');
+                parsedDetails.type = 'UPI';
+                parsedDetails.upiId = parts[1] ? parts[1].trim() : 'N/A';
+                parsedDetails.transactionType = parts[2] ? parts[2].trim() : 'N/A';
+                parsedDetails.name = parts[3] ? parts[3].trim() : 'N/A';
+                parsedDetails.vpa = parts[5] ? parts[5].trim() : 'N/A';
+                parsedDetails.description = parts.slice(6).join('~') || 'N/A';
+            } else if (normalizedParticulars.startsWith('PLI~')) {
+                const parts = normalizedParticulars.split('~');
+                parsedDetails.type = 'PLI Transaction';
+                parsedDetails.upiId = parts[1] ? parts[1].trim() : 'N/A';
+                parsedDetails.name = parts[2] ? parts[2].trim() : 'N/A';
+                parsedDetails.description = parts.slice(3).join('~') || 'N/A';
+                parsedDetails.transactionType = 'CR';
+            } else if (particulars.includes('Int.Pd:')) {
+                const parts = particulars.split(':');
+                const dates = parts[1] ? parts[1].trim() : 'N/A';
+                parsedDetails.type = 'Interest Paid';
+                parsedDetails.description = `Interest paid for period: ${dates}`;
+                parsedDetails.transactionType = 'CR';
+            } else if (particulars.includes('Initial Cash Deposit')) {
+                parsedDetails.type = 'Cash Deposit';
+                parsedDetails.description = 'Initial Cash Deposit';
+                parsedDetails.transactionType = 'CR';
+            } else if (particulars.includes('SB Account Opening Fees')) {
+                parsedDetails.type = 'Bank Fee';
+                parsedDetails.description = 'SB Account Opening Fees';
+                parsedDetails.transactionType = 'DR';
+            } else if (particulars.includes('Debit Card Issuance Fee')) {
+                const date = particulars.match(/(\d{2}-\d{2}-\d{2})|(\d{2}\/\d{2}\/\d{2})/)?.[0];
+                parsedDetails.type = 'Bank Fee';
+                parsedDetails.description = `Debit Card Issuance Fee on ${date || 'N/A'}`;
+                parsedDetails.transactionType = 'DR';
+            }
+
+            // Assign category based on the parsed details and keywords
+            parsedDetails.category = getCategory(particulars);
+            
+            // Assign sub-category based on VPA mapping
+            if (parsedDetails.vpa !== 'N/A' && vpaSubcategoryMap[parsedDetails.vpa]) {
+                parsedDetails.subCategory = vpaSubcategoryMap[parsedDetails.vpa];
+            }
+
+            return parsedDetails;
+        }
+
+        // Function to render the table rows
+        function renderTable(data) {
+            const tableBody = document.getElementById('transactions-table-body');
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            if (data.length === 0) {
+                const row = `<tr><td colspan="9" class="px-6 py-4 text-center text-sm text-gray-500">No transactions found.</td></tr>`;
+                tableBody.innerHTML = row;
+                return;
+            }
+
+            data.forEach(transaction => {
+                const parsedParticulars = transaction.parsed;
+                const transactionTypeClass = parsedParticulars.transactionType === 'CR' ? 'bg-green-100 text-green-800' :
+                                             parsedParticulars.transactionType === 'DR' ? 'bg-red-100 text-red-800' :
+                                             'bg-gray-100 text-gray-800';
+                
+                const subCategoryText = parsedParticulars.subCategory !== 'N/A' ?
+                    `<span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">${parsedParticulars.subCategory}</span>` : '-';
+                
+                const vpaCell = parsedParticulars.vpa !== 'N/A' ? 
+                    `<button onclick="showMapVpaModal('${parsedParticulars.vpa}')" class="text-blue-600 hover:text-blue-800 font-medium">${parsedParticulars.vpa}</button>` : '-';
+
+                const row = `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${transaction.DATE}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold ${transactionTypeClass}">
+                                ${parsedParticulars.category} (${parsedParticulars.transactionType || 'N/A'})
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${subCategoryText}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${parsedParticulars.upiId || '-'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${parsedParticulars.name || 'N/A'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${vpaCell}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600">${parsedParticulars.description}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${transaction.WITHDRWAL || '-'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${transaction.DEPOSIT || '-'}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        }
+
+        // Function to sort the table
+        function sortTable(column) {
+            // Check if we are sorting the same column
+            if (currentSortColumn === column) {
+                // If so, reverse the direction
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                // Otherwise, set the new column and default to ascending
+                currentSortColumn = column;
+                currentSortDirection = 'asc';
+            }
+
+            // Get all sort icons and reset their state
+            document.querySelectorAll('.sortable-header .sort-icon').forEach(icon => {
+                icon.classList.add('hidden');
+            });
+            document.querySelectorAll('.sortable-header').forEach(header => {
+                header.classList.remove('sorted');
+            });
+
+            // Show the icon for the currently sorted column and set direction
+            const currentIcon = document.querySelector(`.sort-icon[data-column="${column}"]`);
+            if (currentIcon) {
+                currentIcon.classList.remove('hidden');
+                document.querySelector(`.sortable-header[onclick="sortTable('${column}')"]`).classList.add('sorted');
+                if (currentSortDirection === 'asc') {
+                    currentIcon.classList.remove('asc');
+                } else {
+                    currentIcon.classList.add('asc');
+                }
+            }
+
+            filteredTransactions.sort((a, b) => {
+                const aValue = a.parsed[column] !== undefined ? a.parsed[column] : a[column];
+                const bValue = b.parsed[column] !== undefined ? b.parsed[column] : b[column];
+                
+                // Handle numeric and string sorting
+                if (!isNaN(parseFloat(aValue)) && isFinite(aValue) && !isNaN(parseFloat(bValue)) && isFinite(bValue)) {
+                    return (parseFloat(aValue) - parseFloat(bValue)) * (currentSortDirection === 'asc' ? 1 : -1);
+                } else {
+                    if (aValue < bValue) return -1 * (currentSortDirection === 'asc' ? 1 : -1);
+                    if (aValue > bValue) return 1 * (currentSortDirection === 'asc' ? 1 : -1);
+                    return 0;
+                }
+            });
+
+            renderTable(filteredTransactions);
+        }
+
+        // Function to create the doughnut chart
+        function renderCharts(data) {
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+
+            const categoryCounts = data.reduce((acc, transaction) => {
+                const category = transaction.parsed.category;
+                acc[category] = (acc[category] || 0) + 1;
+                return acc;
+            }, {});
+
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+            const labels = Object.keys(categoryCounts);
+            const counts = Object.values(categoryCounts);
+
+            const backgroundColors = labels.map((_, index) => `hsl(${index * 60}, 70%, 50%)`);
+
+            categoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: backgroundColors,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Transaction Categories Breakdown'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Function to populate the category dropdown
+        function populateCategoryDropdown() {
+            const select = document.getElementById('category-filter');
+            select.innerHTML = '<option value="All">All Categories</option>';
+            Object.keys(categories).forEach(category => {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                select.appendChild(option);
+            });
+        }
+
+        // Function to populate the sub-category dropdown in the modal
+        function populateSubCategoryDropdown() {
+            const select = document.getElementById('subcategory-dropdown');
+            select.innerHTML = '<option value="">Select a sub-category</option>';
+            subCategories.forEach(subCategory => {
+                const option = document.createElement('option');
+                option.value = subCategory;
+                option.textContent = subCategory;
+                select.appendChild(option);
+            });
+        }
+
+        // Function to filter transactions by category
+        function filterByCategory(category) {
+            if (category === 'All') {
+                filteredTransactions = allTransactions;
+            } else {
+                filteredTransactions = allTransactions.filter(transaction => transaction.parsed.category === category);
+            }
+            renderTable(filteredTransactions);
+        }
+
+        // Function to handle file upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                showLoading(true);
+                document.getElementById('file-name').classList.remove('hidden');
+                document.getElementById('file-name').classList.add('flex');
+                document.getElementById('file-name-text').innerText = file.name;
+                hideError();
+
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        allTransactions = results.data
+                            .filter(row => row['TRANSACTION PARTICULARS'])
+                            .map(row => ({
+                                ...row,
+                                parsed: parseTransactionParticulars(row['TRANSACTION PARTICULARS'])
+                            }));
+                        filteredTransactions = allTransactions;
+                        renderTable(filteredTransactions);
+                        renderCharts(filteredTransactions);
+                        populateCategoryDropdown();
+                        showLoading(false);
+                        document.getElementById('data-container').classList.remove('hidden');
+                        document.getElementById('charts-and-controls-container').classList.remove('hidden');
+                    },
+                    error: function(err) {
+                        showLoading(false);
+                        showError('Error parsing the file. Please ensure it is a valid CSV.');
+                        console.error(err);
+                    }
+                });
+            }
+        }
+
+        // Function to filter transactions based on search term
+        function filterTransactions() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const selectedCategory = document.getElementById('category-filter').value;
+            
+            let tempFiltered = allTransactions;
+            
+            // Apply category filter first
+            if (selectedCategory !== 'All') {
+                tempFiltered = tempFiltered.filter(transaction => transaction.parsed.category === selectedCategory);
+            }
+
+            // Apply search term filter on top of category filter
+            if (searchTerm !== '') {
+                filteredTransactions = tempFiltered.filter(transaction =>
+                    Object.values(transaction).some(value =>
+                        String(value).toLowerCase().includes(searchTerm)
+                    ) || Object.values(transaction.parsed).some(value => 
+                        String(value).toLowerCase().includes(searchTerm)
+                    )
+                );
+            } else {
+                filteredTransactions = tempFiltered;
+            }
+
+            renderTable(filteredTransactions);
+        }
+
+        // Function to reset the application state
+        function resetApp() {
+            allTransactions = [];
+            filteredTransactions = [];
+            vpaSubcategoryMap = {};
+            subCategories = [];
+            document.getElementById('csv-upload').value = null;
+            document.getElementById('file-name').classList.add('hidden');
+            document.getElementById('file-name').classList.remove('flex');
+            document.getElementById('data-container').classList.add('hidden');
+            document.getElementById('charts-and-controls-container').classList.add('hidden');
+            document.getElementById('search-input').value = '';
+            hideError();
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+        }
+
+        function showLoading(show) {
+            const loadingElement = document.getElementById('loading');
+            if (show) {
+                loadingElement.classList.remove('hidden');
+            } else {
+                loadingElement.classList.add('hidden');
+            }
+        }
+        
+        function showError(message) {
+            const errorElement = document.getElementById('error');
+            const errorTextElement = document.getElementById('error-text');
+            errorTextElement.innerText = message;
+            errorElement.classList.remove('hidden');
+            errorElement.classList.add('flex');
+        }
+
+        function hideError() {
+            const errorElement = document.getElementById('error');
+            errorElement.classList.add('hidden');
+            errorElement.classList.remove('flex');
+        }
+
+        // Modal functions
+        function showAddCategoryModal() {
+            document.getElementById('add-category-modal').classList.remove('hidden');
+        }
+
+        function hideAddCategoryModal() {
+            document.getElementById('add-category-modal').classList.add('hidden');
+            document.getElementById('add-category-form').reset();
+        }
+
+        function showAddSubCategoryModal() {
+            document.getElementById('add-subcategory-modal').classList.remove('hidden');
+        }
+
+        function hideAddSubCategoryModal() {
+            document.getElementById('add-subcategory-modal').classList.add('hidden');
+            document.getElementById('add-subcategory-form').reset();
+        }
+
+        function showMapVpaModal(vpa) {
+            document.getElementById('vpa-to-map').value = vpa;
+            populateSubCategoryDropdown();
+            document.getElementById('map-vpa-modal').classList.remove('hidden');
+        }
+
+        function hideMapVpaModal() {
+            document.getElementById('map-vpa-modal').classList.add('hidden');
+            document.getElementById('map-vpa-form').reset();
+        }
+
+        document.getElementById('add-category-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const categoryName = document.getElementById('new-category-name').value;
+            const keywordsString = document.getElementById('new-category-keywords').value;
+            const keywords = keywordsString.split(',').map(k => k.trim().toLowerCase());
+
+            if (categoryName && keywords.length > 0) {
+                categories[categoryName] = keywords;
+                // Re-process all transactions with new categories
+                allTransactions = allTransactions.map(transaction => ({
+                    ...transaction,
+                    parsed: parseTransactionParticulars(transaction['TRANSACTION PARTICULARS'])
+                }));
+                // Update dropdown and table
+                populateCategoryDropdown();
+                filterByCategory('All');
+                renderCharts(filteredTransactions);
+                hideAddCategoryModal();
+            } else {
+                // In a real app, you might show an error message
+                console.error("Category name and keywords are required.");
+            }
+        });
+        
+        document.getElementById('add-subcategory-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const subCategoryName = document.getElementById('new-subcategory-name').value.trim();
+            if (subCategoryName && !subCategories.includes(subCategoryName)) {
+                subCategories.push(subCategoryName);
+                populateSubCategoryDropdown(); // Update the dropdown with the new sub-category
+                hideAddSubCategoryModal();
+            }
+        });
+        
+        document.getElementById('map-vpa-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const vpa = document.getElementById('vpa-to-map').value;
+            const subCategory = document.getElementById('subcategory-dropdown').value;
+            
+            if (vpa && subCategory) {
+                vpaSubcategoryMap[vpa] = subCategory;
+                // Re-process all transactions with the new mapping
+                allTransactions = allTransactions.map(transaction => ({
+                    ...transaction,
+                    parsed: parseTransactionParticulars(transaction['TRANSACTION PARTICULARS'])
+                }));
+                // Re-render the table to reflect the changes
+                filterTransactions();
+                hideMapVpaModal();
+            }
+        });
+
+        // Initialize Lucide icons
+        window.addEventListener('load', () => {
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+Set objOutlook = CreateObject("Outlook.Application")
+Set objMail = objOutlook.CreateItem(0)
+objMail.To = "recipient@example.com"
+objMail.Subject = "Your Subject"
+objMail.Body = "This is the email body."
+
+' Optional: Attach a file
+' objMail.Attachments.Add "C:\path\to\file.txt"
+
+objMail.Send
+
+Set objMail = Nothing
+Set objOutlook = Nothing

@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement Analyzer</title>
+    <!-- Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <!-- PapaParse from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Chart.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons from CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .sortable-header {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .sortable-header .sort-icon {
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.3;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .sortable-header:hover .sort-icon,
+        .sortable-header.sorted .sort-icon {
+            opacity: 1;
+        }
+        .sortable-header .sort-icon.asc {
+            transform: translateY(-50%) rotate(180deg);
+        }
+        .chart-tab-button {
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            font-weight: 500;
+            background-color: #e5e7eb;
+            color: #4b5563;
+            transition-property: all;
+            transition-duration: 200ms;
+        }
+        .chart-tab-button.active {
+            background-color: #4f46e5;
+            color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        /* Responsive sidebar toggle */
+        #sidebar {
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        @media (max-width: 1024px) {
+            #sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 50;
+                transform: translateX(-100%);
+            }
+            #sidebar.open {
+                transform: translateX(0);
+            }
+            #overlay {
+                display: none;
+            }
+            #overlay.open {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans antialiased text-gray-800">
+
+    <div id="overlay" class="fixed inset-0 bg-gray-900 bg-opacity-50 z-40 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+    <div class="lg:flex min-h-screen">
+        <!-- Sidebar for filters -->
+        <div id="sidebar" class="w-full lg:w-80 bg-white shadow-xl lg:shadow-none p-6 space-y-8 flex-shrink-0 border-r border-gray-200">
+            <div class="flex items-center justify-between lg:block">
+                <h2 class="text-2xl font-bold text-gray-900">Filters</h2>
+                <button onclick="toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div id="filter-controls" class="space-y-4 hidden">
+                <div>
+                    <label for="filter-category" class="block text-sm font-medium text-gray-700">Category</label>
+                    <select id="filter-category" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Categories</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-subcategory" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                    <select id="filter-subcategory" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Sub-Categories</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-type" class="block text-sm font-medium text-gray-700">Transaction Type</label>
+                    <select id="filter-type" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Types</option>
+                        <option value="CR">Credit</option>
+                        <option value="DR">Debit</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-year" class="block text-sm font-medium text-gray-700">Year</label>
+                    <select id="filter-year" onchange="filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="All">All Years</option>
+                    </select>
+                </div>
+                <button onclick="clearFilters()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Clear Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Main content area -->
+        <div class="flex-1 p-4 sm:p-8">
+            <div class="container mx-auto max-w-7xl">
+                <!-- Header -->
+                <div class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8">
+                    <div class="flex items-center justify-between">
+                        <h1 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">
+                            Post Office Bank Statement Analyzer
+                        </h1>
+                        <button onclick="toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-filter"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                        </button>
+                    </div>
+                    <p class="text-gray-600 text-lg">
+                        Upload your CSV file to expand transaction details into a structured table, visualize your data, and categorize transactions.
+                    </p>
+                    <div class="mt-6 flex flex-col sm:flex-row items-center gap-4">
+                        <label
+                            for="csv-upload"
+                            class="w-full sm:w-auto px-6 py-3 border-2 border-dashed border-indigo-400 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors duration-200 cursor-pointer text-center font-medium"
+                        >
+                            <div class="flex items-center justify-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.36M16 19l-4-4-4 4M12 15v9"/></svg>
+                                <span>Choose a CSV file</span>
+                            </div>
+                            <input
+                                id="csv-upload"
+                                type="file"
+                                accept=".csv"
+                                onchange="handleFileUpload(event)"
+                                class="hidden"
+                            />
+                        </label>
+                        <span id="file-name" class="text-gray-500 text-sm sm:text-base hidden items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 12h8"/><path d="M8 16h8"/><path d="M8 20h5"/></svg>
+                            <span id="file-name-text"></span>
+                            <button
+                                onclick="resetApp()"
+                                class="text-red-500 hover:text-red-700 transition-colors"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                            </button>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Loading and Error states -->
+                <div id="loading" class="text-center p-8 text-indigo-600 hidden">
+                    <p>Processing your file...</p>
+                </div>
+                <div id="error" class="bg-red-100 text-red-700 p-4 rounded-xl flex items-center gap-2 hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                    <p id="error-text"></p>
+                </div>
+
+                <!-- Charts and Controls -->
+                <div id="charts-and-controls-container" class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8 hidden">
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">Financial Visualizations</h2>
+                    <!-- Chart Tabs -->
+                    <div class="flex flex-wrap gap-2 sm:gap-4 mb-6">
+                        <button class="chart-tab-button active" onclick="showChart('category-breakdown', this)">Category Breakdown</button>
+                        <button class="chart-tab-button" onclick="showChart('credit-debit', this)">Credit vs Debit</button>
+                        <button class="chart-tab-button" onclick="showChart('category-utilization', this)">Category Utilization</button>
+                        <button class="chart-tab-button" onclick="showChart('subcategory-utilization', this)">Sub-Category Utilization</button>
+                        <button class="chart-tab-button" onclick="showChart('vpa-utilization', this)">VPA Utilization</button>
+                    </div>
+
+                    <!-- Chart Containers -->
+                    <div id="chart-category-breakdown" class="chart-container">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                    
+                    <div id="chart-credit-debit" class="chart-container hidden">
+                        <canvas id="creditDebitChart"></canvas>
+                    </div>
+
+                    <div id="chart-category-utilization" class="chart-container hidden">
+                        <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                            <div>
+                                <label for="category-utilization-time-frame" class="block text-sm font-medium text-gray-700 mb-1">Time Frame</label>
+                                <select id="category-utilization-time-frame" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderCategoryUtilizationChart()">
+                                    <option value="month">Monthly</option>
+                                    <option value="day">Daily</option>
+                                    <option value="year">Yearly</option>
+                                </select>
+                            </div>
+                            <div class="flex-grow">
+                                <label for="category-utilization-filter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Category</label>
+                                <select id="category-utilization-filter" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderCategoryUtilizationChart()">
+                                    <option value="All">All Categories</option>
+                                </select>
+                            </div>
+                        </div>
+                        <canvas id="categoryUtilizationChart"></canvas>
+                    </div>
+
+                    <div id="chart-subcategory-utilization" class="chart-container hidden">
+                        <div class="flex flex-col sm:flex-row gap-4 mb-4">
+                            <div>
+                                <label for="subcategory-utilization-time-frame" class="block text-sm font-medium text-gray-700 mb-1">Time Frame</label>
+                                <select id="subcategory-utilization-time-frame" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderSubCategoryUtilizationChart()">
+                                    <option value="month">Monthly</option>
+                                    <option value="day">Daily</option>
+                                    <option value="year">Yearly</option>
+                                </select>
+                            </div>
+                            <div class="flex-grow">
+                                <label for="subcategory-utilization-filter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Sub-Category</label>
+                                <select id="subcategory-utilization-filter" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" onchange="renderSubCategoryUtilizationChart()">
+                                    <option value="All">All Sub-Categories</option>
+                                </select>
+                            </div>
+                        </div>
+                        <canvas id="subcategoryUtilizationChart"></canvas>
+                    </div>
+                    
+                    <div id="chart-vpa-utilization" class="chart-container hidden">
+                        <canvas id="vpaUtilizationChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Data Table and Search -->
+                <div id="data-container" class="bg-white shadow-xl rounded-2xl overflow-hidden hidden">
+                    <div class="p-4 sm:p-6 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                        <h2 class="text-xl sm:text-2xl font-semibold text-gray-900">Transaction Details</h2>
+                        <div class="relative w-full sm:w-1/3">
+                            <input
+                                type="text"
+                                placeholder="Search transactions..."
+                                id="search-input"
+                                onkeyup="filterTransactions()"
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('DATE')">
+                                        Date
+                                        <span class="sort-icon hidden" data-column="DATE">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('category')">
+                                        Category
+                                        <span class="sort-icon hidden" data-column="category">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('subCategory')">
+                                        Sub-Category
+                                        <span class="sort-icon hidden" data-column="subCategory">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('upiId')">
+                                        Transaction ID
+                                        <span class="sort-icon hidden" data-column="upiId">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('name')">
+                                        Sender/Receiver
+                                        <span class="sort-icon hidden" data-column="name">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        VPA
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Description
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('WITHDRWAL')">
+                                        Withdrawal
+                                        <span class="sort-icon hidden" data-column="WITHDRWAL">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="sortTable('DEPOSIT')">
+                                        Deposit
+                                        <span class="sort-icon hidden" data-column="DEPOSIT">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                        </span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="transactions-table-body" class="bg-white divide-y divide-gray-200">
+                                <!-- Table rows will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Category Modal -->
+    <div id="add-category-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideAddCategoryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Add New Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="add-category-form">
+                                <div class="mb-4">
+                                    <label for="new-category-name" class="block text-sm font-medium text-gray-700">Category Name</label>
+                                    <input type="text" id="new-category-name" name="categoryName" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mb-4">
+                                    <label for="new-category-keywords" class="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
+                                    <input type="text" id="new-category-keywords" name="keywords" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Add Category
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideAddCategoryModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Map VPA to Sub-Category Modal -->
+    <div id="map-vpa-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideMapVpaModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Map VPA to Sub-Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="map-vpa-form">
+                                <div class="mb-4">
+                                    <label for="vpa-to-map" class="block text-sm font-medium text-gray-700">VPA</label>
+                                    <input type="text" id="vpa-to-map" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 bg-gray-100 cursor-not-allowed" readonly>
+                                </div>
+                                <div class="mb-4">
+                                    <label for="subcategory-dropdown" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <select id="subcategory-dropdown" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
+                                            <option value="">Select a sub-category</option>
+                                        </select>
+                                        <button type="button" class="p-2 border border-gray-300 rounded-md shadow-sm text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" onclick="showAddSubCategoryModal()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-plus"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Map VPA
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideMapVpaModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Sub-Category Modal -->
+    <div id="add-subcategory-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideAddSubCategoryModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Add New Sub-Category
+                        </h3>
+                        <div class="mt-2">
+                            <form id="add-subcategory-form">
+                                <div class="mb-4">
+                                    <label for="new-subcategory-name" class="block text-sm font-medium text-gray-700">Sub-Category Name</label>
+                                    <input type="text" id="new-subcategory-name" name="subcategoryName" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">
+                                        Add Sub-Category
+                                    </button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="hideAddSubCategoryModal()">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Duplicate Transactions Modal -->
+    <div id="duplicate-transactions-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="hideDuplicatesModal()"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-2xl sm:w-full sm:p-6">
+                <div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Duplicate Transactions Found
+                        </h3>
+                        <div class="mt-2">
+                            <p class="text-sm text-gray-500">The following transactions appear to be duplicates in the uploaded file. They are still included in the main table.</p>
+                            <div id="duplicate-list" class="mt-4 max-h-96 overflow-y-auto">
+                                <!-- Duplicate items will be inserted here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-5 sm:mt-6">
+                    <button type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:text-sm" onclick="hideDuplicatesModal()">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        let allTransactions = [];
+        let filteredTransactions = [];
+        let categoryChart, creditDebitChart, categoryUtilizationChart, subcategoryUtilizationChart, vpaUtilizationChart;
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc';
+        let currentActiveChartId = 'category-breakdown';
+
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        // Pre-defined categories
+        let categories = {
+            'UPI Transaction': ['upi'],
+            'Bank Fee': ['fee', 'charge'],
+            'Initial Deposit': ['initial cash deposit'],
+            'PLI Transaction': ['pli'],
+            'Interest': ['int.pd:']
+        };
+
+        // Sub-categories list
+        let subCategories = [];
+
+        // VPA to sub-category mapping
+        let vpaSubcategoryMap = {};
+
+        const transactionTypeMap = {
+            'CR': 'Credit',
+            'DR': 'Debit',
+            'N/A': 'N/A'
+        };
+
+        // Utility function to get a consistent color for a given string (like a category name)
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            let color = '#';
+            for (let i = 0; i < 3; i++) {
+                let value = (hash >> (i * 8)) & 0xFF;
+                color += ('00' + value.toString(16)).substr(-2);
+            }
+            return color;
+        }
+
+        // Function to parse the transaction particulars string
+        function parseTransactionParticulars(particulars) {
+            // Normalize delimiters by replacing '/' with '~'
+            const normalizedParticulars = particulars.replace(/\//g, '~').toLowerCase();
+            
+            let parsedDetails = {
+                type: 'Other',
+                upiId: 'N/A',
+                transactionType: 'N/A',
+                name: 'N/A',
+                vpa: 'N/A',
+                description: particulars,
+                category: 'Other',
+                subCategory: 'N/A'
+            };
+
+            // Hierarchy of categorization: handle specific cases first, then fall back to keywords
+            if (normalizedParticulars.startsWith('upi~')) {
+                const parts = particulars.split('~');
+                parsedDetails.type = 'UPI';
+                parsedDetails.upiId = parts[1] ? parts[1].trim() : 'N/A';
+                parsedDetails.transactionType = parts[2] ? parts[2].trim() : 'N/A';
+                parsedDetails.name = parts[3] ? parts[3].trim() : 'N/A';
+                parsedDetails.vpa = parts[5] ? parts[5].trim() : 'N/A';
+                parsedDetails.description = parts.slice(6).join('~') || 'N/A';
+                parsedDetails.category = 'UPI Transaction';
+            } else if (normalizedParticulars.includes('pli~')) {
+                const parts = particulars.split('~');
+                parsedDetails.type = 'PLI Transaction';
+                parsedDetails.upiId = parts[1] ? parts[1].trim() : 'N/A';
+                parsedDetails.name = parts[2] ? parts[2].trim() : 'N/A';
+                parsedDetails.description = parts.slice(3).join('~') || 'N/A';
+                parsedDetails.transactionType = 'CR';
+                parsedDetails.category = 'PLI Transaction';
+            } else if (normalizedParticulars.includes('int.pd:')) {
+                const parts = particulars.split(':');
+                const dates = parts[1] ? parts[1].trim() : 'N/A';
+                parsedDetails.type = 'Interest Paid';
+                parsedDetails.description = `Interest paid for period: ${dates}`;
+                parsedDetails.transactionType = 'CR';
+                parsedDetails.category = 'Interest';
+            } else if (normalizedParticulars.includes('initial cash deposit')) {
+                parsedDetails.type = 'Cash Deposit';
+                parsedDetails.description = 'Initial Cash Deposit';
+                parsedDetails.transactionType = 'CR';
+                parsedDetails.category = 'Initial Deposit';
+            } else if (normalizedParticulars.includes('sb account opening fees') || normalizedParticulars.includes('debit card issuance fee')) {
+                parsedDetails.type = 'Bank Fee';
+                parsedDetails.description = particulars;
+                parsedDetails.transactionType = 'DR';
+                parsedDetails.category = 'Bank Fee';
+            } else {
+                // Fallback to keyword matching for generic transactions
+                for (const category in categories) {
+                    if (categories[category].some(keyword => normalizedParticulars.includes(keyword))) {
+                        parsedDetails.category = category;
+                        break;
+                    }
+                }
+            }
+
+            // Assign sub-category based on VPA mapping
+            if (parsedDetails.vpa !== 'N/A' && vpaSubcategoryMap[parsedDetails.vpa]) {
+                parsedDetails.subCategory = vpaSubcategoryMap[parsedDetails.vpa];
+            }
+
+            return parsedDetails;
+        }
+
+        // Function to render the table rows
+        function renderTable(data) {
+            const tableBody = document.getElementById('transactions-table-body');
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            if (data.length === 0) {
+                const row = `<tr><td colspan="9" class="px-6 py-4 text-center text-sm text-gray-500">No transactions found.</td></tr>`;
+                tableBody.innerHTML = row;
+                return;
+            }
+
+            data.forEach(transaction => {
+                const parsedParticulars = transaction.parsed;
+                const transactionTypeClass = parsedParticulars.transactionType === 'CR' ? 'bg-green-100 text-green-800' :
+                                             parsedParticulars.transactionType === 'DR' ? 'bg-red-100 text-red-800' :
+                                             'bg-gray-100 text-gray-800';
+                
+                const subCategoryText = parsedParticulars.subCategory !== 'N/A' ?
+                    `<span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">${parsedParticulars.subCategory}</span>` : '-';
+                
+                const vpaCell = parsedParticulars.vpa !== 'N/A' ? 
+                    `<button onclick="showMapVpaModal('${parsedParticulars.vpa}')" class="text-blue-600 hover:text-blue-800 font-medium">${parsedParticulars.vpa}</button>` : '-';
+
+                const row = `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${transaction.DATE}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                            <span class="px-2 py-1 rounded-full text-xs font-semibold ${transactionTypeClass}">
+                                ${parsedParticulars.category} (${parsedParticulars.transactionType || 'N/A'})
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${subCategoryText}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${parsedParticulars.upiId || '-'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${parsedParticulars.name || 'N/A'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${vpaCell}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600">${parsedParticulars.description}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${transaction.WITHDRWAL || '-'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">${transaction.DEPOSIT || '-'}</td>
+                    </tr>
+                `;
+                tableBody.innerHTML += row;
+            });
+        }
+
+        // Function to sort the table
+        function sortTable(column) {
+            if (currentSortColumn === column) {
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = column;
+                currentSortDirection = 'asc';
+            }
+
+            document.querySelectorAll('.sortable-header .sort-icon').forEach(icon => {
+                icon.classList.add('hidden');
+            });
+            document.querySelectorAll('.sortable-header').forEach(header => {
+                header.classList.remove('sorted');
+            });
+
+            const currentIcon = document.querySelector(`.sort-icon[data-column="${column}"]`);
+            if (currentIcon) {
+                currentIcon.classList.remove('hidden');
+                document.querySelector(`.sortable-header[onclick="sortTable('${column}')"]`).classList.add('sorted');
+                if (currentSortDirection === 'asc') {
+                    currentIcon.classList.remove('asc');
+                } else {
+                    currentIcon.classList.add('asc');
+                }
+            }
+
+            filteredTransactions.sort((a, b) => {
+                let aValue, bValue;
+                if (column === 'DATE') {
+                    aValue = formatDate(a[column]).getTime();
+                    bValue = formatDate(b[column]).getTime();
+                } else if (['category', 'subCategory', 'upiId', 'name'].includes(column)) {
+                    aValue = a.parsed[column];
+                    bValue = b.parsed[column];
+                } else {
+                    aValue = a[column];
+                    bValue = b[column];
+                }
+
+                if (!isNaN(parseFloat(aValue)) && isFinite(aValue) && !isNaN(parseFloat(bValue)) && isFinite(bValue)) {
+                    return (parseFloat(aValue) - parseFloat(bValue)) * (currentSortDirection === 'asc' ? 1 : -1);
+                } else {
+                    if (aValue < bValue) return -1 * (currentSortDirection === 'asc' ? 1 : -1);
+                    if (aValue > bValue) return 1 * (currentSortDirection === 'asc' ? 1 : -1);
+                    return 0;
+                }
+            });
+
+            renderTable(filteredTransactions);
+        }
+
+        // Function to create the category breakdown doughnut chart
+        function renderCategoryBreakdownChart(data) {
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+            
+            const categoryData = data.reduce((acc, transaction) => {
+                const category = transaction.parsed.category;
+                if (!acc[category]) {
+                    acc[category] = { count: 0, totalAmount: 0 };
+                }
+                acc[category].count++;
+                acc[category].totalAmount += parseFloat(transaction.WITHDRWAL || transaction.DEPOSIT || 0);
+                return acc;
+            }, {});
+
+            const labels = Object.keys(categoryData);
+            const counts = Object.values(categoryData).map(item => item.count);
+            const amounts = Object.values(categoryData).map(item => item.totalAmount);
+
+            const backgroundColors = labels.map(label => stringToColor(label));
+
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+            categoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: counts,
+                        backgroundColor: backgroundColors,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        title: {
+                            display: true,
+                            text: 'Transaction Categories Breakdown'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const count = context.raw;
+                                    const amount = amounts[context.dataIndex];
+                                    return `${label}: ${count} transactions, ₹${amount.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Function to render the Credit vs Debit chart
+        function renderCreditDebitChart(data) {
+            if (creditDebitChart) {
+                creditDebitChart.destroy();
+            }
+
+            const totals = data.reduce((acc, transaction) => {
+                if (transaction.WITHDRWAL && transaction.WITHDRWAL !== ' ') {
+                    acc.debit += parseFloat(transaction.WITHDRWAL);
+                }
+                if (transaction.DEPOSIT && transaction.DEPOSIT !== ' ') {
+                    acc.credit += parseFloat(transaction.DEPOSIT);
+                }
+                return acc;
+            }, { debit: 0, credit: 0 });
+
+            const ctx = document.getElementById('creditDebitChart').getContext('2d');
+            creditDebitChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Credit', 'Debit'],
+                    datasets: [{
+                        label: 'Total Amount',
+                        data: [totals.credit.toFixed(2), totals.debit.toFixed(2)],
+                        backgroundColor: [
+                            'rgb(34, 197, 94)', // Green
+                            'rgb(239, 68, 68)' // Red
+                        ],
+                        borderColor: [
+                            'rgb(22, 163, 74)',
+                            'rgb(220, 38, 38)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false },
+                        title: { display: true, text: 'Total Credit vs Debit' }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Function to render the utilization charts (category and sub-category)
+        function renderUtilizationCharts() {
+            renderCategoryUtilizationChart();
+            renderSubCategoryUtilizationChart();
+            renderVpaUtilizationChart();
+        }
+
+        // Function to render the category utilization chart
+        function renderCategoryUtilizationChart() {
+            if (categoryUtilizationChart) {
+                categoryUtilizationChart.destroy();
+            }
+
+            const timeFrame = document.getElementById('category-utilization-time-frame').value;
+            const filterCategory = document.getElementById('category-utilization-filter').value;
+
+            let dataToProcess = filteredTransactions;
+            if (filterCategory !== 'All') {
+                dataToProcess = filteredTransactions.filter(t => t.parsed.category === filterCategory);
+            }
+
+            const aggregatedData = aggregateDataByTimeAndGroup(dataToProcess, 'category', timeFrame, filterCategory);
+
+            const ctx = document.getElementById('categoryUtilizationChart').getContext('2d');
+            categoryUtilizationChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: aggregatedData.labels,
+                    datasets: [{
+                        label: 'Withdrawal',
+                        data: aggregatedData.withdrawal,
+                        backgroundColor: 'rgb(239, 68, 68)',
+                    },
+                    {
+                        label: 'Deposit',
+                        data: aggregatedData.deposit,
+                        backgroundColor: 'rgb(34, 197, 94)',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Utilization by Category (${timeFrame.charAt(0).toUpperCase() + timeFrame.slice(1)}ly)`
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ₹${parseFloat(context.raw).toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true },
+                        y: { stacked: true }
+                    }
+                }
+            });
+        }
+
+        // Function to render the sub-category utilization chart
+        function renderSubCategoryUtilizationChart() {
+            if (subcategoryUtilizationChart) {
+                subcategoryUtilizationChart.destroy();
+            }
+
+            const timeFrame = document.getElementById('subcategory-utilization-time-frame').value;
+            const filterSubCategory = document.getElementById('subcategory-utilization-filter').value;
+            
+            let dataToProcess = filteredTransactions;
+            if (filterSubCategory !== 'All') {
+                dataToProcess = filteredTransactions.filter(t => t.parsed.subCategory === filterSubCategory);
+            }
+
+            const aggregatedData = aggregateDataByTimeAndGroup(dataToProcess, 'subCategory', timeFrame, filterSubCategory);
+            
+            const ctx = document.getElementById('subcategoryUtilizationChart').getContext('2d');
+            subcategoryUtilizationChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: aggregatedData.labels,
+                    datasets: [{
+                        label: 'Withdrawal',
+                        data: aggregatedData.withdrawal,
+                        backgroundColor: 'rgb(239, 68, 68)',
+                    },
+                    {
+                        label: 'Deposit',
+                        data: aggregatedData.deposit,
+                        backgroundColor: 'rgb(34, 197, 94)',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Utilization by Sub-Category (${timeFrame.charAt(0).toUpperCase() + timeFrame.slice(1)}ly)`
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ₹${parseFloat(context.raw).toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true },
+                        y: { stacked: true }
+                    }
+                }
+            });
+        }
+        
+        // Function to render the VPA utilization chart
+        function renderVpaUtilizationChart() {
+            if (vpaUtilizationChart) {
+                vpaUtilizationChart.destroy();
+            }
+
+            // Aggregate data by VPA
+            const vpaData = filteredTransactions.filter(t => t.parsed.vpa !== 'N/A').reduce((acc, transaction) => {
+                const vpa = transaction.parsed.vpa;
+                if (!acc[vpa]) {
+                    acc[vpa] = { withdrawal: 0, deposit: 0 };
+                }
+                if (transaction.WITHDRWAL && transaction.WITHDRWAL !== ' ') {
+                    acc[vpa].withdrawal += parseFloat(transaction.WITHDRWAL);
+                }
+                if (transaction.DEPOSIT && transaction.DEPOSIT !== ' ') {
+                    acc[vpa].deposit += parseFloat(transaction.DEPOSIT);
+                }
+                return acc;
+            }, {});
+
+            const labels = Object.keys(vpaData);
+            const withdrawalData = labels.map(vpa => vpaData[vpa].withdrawal.toFixed(2));
+            const depositData = labels.map(vpa => vpaData[vpa].deposit.toFixed(2));
+
+            const ctx = document.getElementById('vpaUtilizationChart').getContext('2d');
+            vpaUtilizationChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Total Withdrawal',
+                        data: withdrawalData,
+                        backgroundColor: 'rgb(239, 68, 68)',
+                    }, {
+                        label: 'Total Deposit',
+                        data: depositData,
+                        backgroundColor: 'rgb(34, 197, 94)',
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Total Utilization by VPA'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ₹${parseFloat(context.raw).toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { stacked: true },
+                        y: { stacked: true, beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        function formatDate(dateString) {
+            if (dateString instanceof Date) {
+                return dateString;
+            }
+
+            if (!dateString) {
+                console.error("formatDate received an invalid or empty date string.");
+                return new Date(NaN);
+            }
+
+            try {
+                const parts = dateString.split('-');
+                const day = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10);
+                const year = parseInt(parts[2], 10);
+
+                const newDate = new Date(year, month - 1, day);
+
+                if (isNaN(newDate.getTime())) {
+                    console.error(`Failed to create a valid Date object from string: ${dateString}`);
+                    return new Date(NaN);
+                }
+
+                return newDate;
+            } catch (error) {
+                console.error(`An error occurred while parsing date string: ${dateString}`, error);
+                return new Date(NaN);
+            }
+        }
+        
+        // Helper function to aggregate data by a given key and time frame
+        function aggregateDataByTimeAndGroup(data, groupKey, timeFrame, filterValue) {
+            const aggregated = {};
+            const uniqueDates = [...new Set(data.map(t => formatDate(t.DATE)))].filter(d => !isNaN(d.getTime())).sort((a, b) => a - b);
+            
+            let allLabels = [];
+            if (uniqueDates.length > 0) {
+                let start = new Date(uniqueDates[0]);
+                let end = new Date(uniqueDates[uniqueDates.length - 1]);
+                
+                if (timeFrame === 'month') {
+                    start.setDate(1);
+                    while (start <= end) {
+                        allLabels.push(monthNames[start.getMonth()] + ' ' + start.getFullYear());
+                        start.setMonth(start.getMonth() + 1);
+                    }
+                } else if (timeFrame === 'day') {
+                    while (start <= end) {
+                        allLabels.push(start.getFullYear() + '-' + String(start.getMonth() + 1).padStart(2, '0') + '-' + String(start.getDate()).padStart(2, '0'));
+                        start.setDate(start.getDate() + 1);
+                    }
+                } else if (timeFrame === 'year') {
+                    start.setMonth(0, 1);
+                    while (start.getFullYear() <= end.getFullYear()) {
+                        allLabels.push(start.getFullYear().toString());
+                        start.setFullYear(start.getFullYear() + 1);
+                    }
+                }
+            }
+
+            allLabels.forEach(label => {
+                aggregated[label] = { withdrawal: 0, deposit: 0 };
+            });
+
+            data.forEach(transaction => {
+                const dateObj = formatDate(transaction.DATE);
+                if (isNaN(dateObj.getTime())) {
+                    return;
+                }
+                
+                let dateKey;
+                if (timeFrame === 'month') {
+                    dateKey = monthNames[dateObj.getMonth()] + ' ' + dateObj.getFullYear();
+                } else if (timeFrame === 'day') {
+                    dateKey = dateObj.getFullYear() + '-' + String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + String(dateObj.getDate()).padStart(2, '0');
+                } else if (timeFrame === 'year') {
+                    dateKey = dateObj.getFullYear().toString();
+                }
+
+                const group = transaction.parsed[groupKey];
+                
+                if ((filterValue === 'All' || group === filterValue) && aggregated[dateKey]) {
+                    if (transaction.WITHDRWAL && transaction.WITHDRWAL !== ' ') {
+                        aggregated[dateKey].withdrawal += parseFloat(transaction.WITHDRWAL);
+                    }
+                    if (transaction.DEPOSIT && transaction.DEPOSIT !== ' ') {
+                        aggregated[dateKey].deposit += parseFloat(transaction.DEPOSIT);
+                    }
+                }
+            });
+            
+            const labels = Object.keys(aggregated).sort((a, b) => {
+                // Custom sorting for month labels
+                if (timeFrame === 'month') {
+                    const [monthA, yearA] = a.split(' ');
+                    const [monthB, yearB] = b.split(' ');
+                    const dateA = new Date(`${monthA} 1, ${yearA}`);
+                    const dateB = new Date(`${monthB} 1, ${yearB}`);
+                    return dateA - dateB;
+                }
+                return a.localeCompare(b);
+            });
+            
+            const withdrawalData = labels.map(label => aggregated[label].withdrawal.toFixed(2));
+            const depositData = labels.map(label => aggregated[label].deposit.toFixed(2));
+
+            return { labels: labels, withdrawal: withdrawalData, deposit: depositData };
+        }
+
+        // Function to populate the category dropdowns
+        function populateCategoryDropdowns() {
+            const sidebarFilter = document.getElementById('filter-category');
+            const chartFilter = document.getElementById('category-utilization-filter');
+            
+            sidebarFilter.innerHTML = '<option value="All">All Categories</option>';
+            chartFilter.innerHTML = '<option value="All">All Categories</option>';
+            
+            const uniqueCategories = [...new Set(allTransactions.map(t => t.parsed.category))].sort();
+            uniqueCategories.forEach(category => {
+                const option1 = document.createElement('option');
+                option1.value = category;
+                option1.textContent = category;
+                sidebarFilter.appendChild(option1);
+                
+                const option2 = document.createElement('option');
+                option2.value = category;
+                option2.textContent = category;
+                chartFilter.appendChild(option2);
+            });
+        }
+        
+        // Function to populate the sub-category dropdowns
+        function populateSubCategoryDropdowns() {
+            const sidebarFilter = document.getElementById('filter-subcategory');
+            const chartFilter = document.getElementById('subcategory-utilization-filter');
+            
+            sidebarFilter.innerHTML = '<option value="All">All Sub-Categories</option>';
+            chartFilter.innerHTML = '<option value="All">All Sub-Categories</option>';
+
+            const uniqueSubCategories = [...new Set(allTransactions.map(t => t.parsed.subCategory))].filter(sc => sc !== 'N/A').sort();
+            uniqueSubCategories.forEach(subCategory => {
+                const option1 = document.createElement('option');
+                option1.value = subCategory;
+                option1.textContent = subCategory;
+                sidebarFilter.appendChild(option1);
+
+                const option2 = document.createElement('option');
+                option2.value = subCategory;
+                option2.textContent = subCategory;
+                chartFilter.appendChild(option2);
+            });
+
+            populateSubCategoryDropdown();
+        }
+        
+        // Function to populate the years dropdown in the sidebar
+        function populateYearDropdown() {
+            const yearFilter = document.getElementById('filter-year');
+            yearFilter.innerHTML = '<option value="All">All Years</option>';
+            const uniqueYears = [...new Set(allTransactions.map(t => formatDate(t.DATE).getFullYear()))].sort();
+            uniqueYears.forEach(year => {
+                if(!isNaN(year)) {
+                    const option = document.createElement('option');
+                    option.value = year;
+                    option.textContent = year;
+                    yearFilter.appendChild(option);
+                }
+            });
+        }
+        
+        function populateSubCategoryDropdown() {
+             const subCategoryDropdown = document.getElementById('subcategory-dropdown');
+             subCategoryDropdown.innerHTML = '<option value="">Select a sub-category</option>';
+             subCategories.sort().forEach(sc => {
+                const option = document.createElement('option');
+                option.value = sc;
+                option.textContent = sc;
+                subCategoryDropdown.appendChild(option);
+            });
+        }
+
+        // Function to handle file upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                showLoading(true);
+                document.getElementById('file-name').classList.remove('hidden');
+                document.getElementById('file-name').classList.add('flex');
+                document.getElementById('file-name-text').innerText = file.name;
+                hideError();
+
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        // Find and show duplicates
+                        const duplicates = findDuplicates(results.data);
+                        if (duplicates.length > 0) {
+                            showDuplicatesModal(duplicates);
+                        }
+
+                        // Continue with existing logic
+                        allTransactions = results.data
+                            .filter(row => row['TRANSACTION PARTICULARS'] && row['DATE'])
+                            .map(row => ({
+                                ...row,
+                                parsed: parseTransactionParticulars(row['TRANSACTION PARTICULARS'])
+                            }));
+                        filteredTransactions = allTransactions;
+                        renderTable(filteredTransactions);
+                        initializeAndRenderCharts();
+                        populateCategoryDropdowns();
+                        populateSubCategoryDropdowns();
+                        populateYearDropdown();
+                        showLoading(false);
+                        document.getElementById('data-container').classList.remove('hidden');
+                        document.getElementById('charts-and-controls-container').classList.remove('hidden');
+                        document.getElementById('filter-controls').classList.remove('hidden');
+                    },
+                    error: function(err) {
+                        showLoading(false);
+                        showError('Error parsing the file. Please ensure it is a valid CSV.');
+                        console.error(err);
+                    }
+                });
+            }
+        }
+
+        function initializeAndRenderCharts() {
+            renderCategoryBreakdownChart(filteredTransactions);
+            renderCreditDebitChart(filteredTransactions);
+            renderUtilizationCharts();
+        }
+
+        // Function to filter transactions based on search term and dropdowns
+        function filterTransactions() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            const filterCategory = document.getElementById('filter-category').value;
+            const filterSubCategory = document.getElementById('filter-subcategory').value;
+            const filterType = document.getElementById('filter-type').value;
+            const filterYear = document.getElementById('filter-year').value;
+            
+            filteredTransactions = allTransactions.filter(transaction => {
+                // Check search term
+                const passesSearch = Object.values(transaction).some(value =>
+                    String(value).toLowerCase().includes(searchTerm)
+                ) || Object.values(transaction.parsed).some(value =>
+                    String(value).toLowerCase().includes(searchTerm)
+                );
+
+                // Check category filter
+                const passesCategory = filterCategory === 'All' || transaction.parsed.category === filterCategory;
+
+                // Check sub-category filter
+                const passesSubCategory = filterSubCategory === 'All' || transaction.parsed.subCategory === filterSubCategory;
+
+                // Check transaction type filter
+                const passesType = filterType === 'All' || transaction.parsed.transactionType === filterType;
+                
+                // Check year filter
+                const passesYear = filterYear === 'All' || formatDate(transaction.DATE).getFullYear().toString() === filterYear;
+
+                return passesSearch && passesCategory && passesSubCategory && passesType && passesYear;
+            });
+
+            renderTable(filteredTransactions);
+            showChart(currentActiveChartId, document.querySelector(`.chart-tab-button.active`));
+        }
+        
+        // Function to clear all filters
+        function clearFilters() {
+            document.getElementById('search-input').value = '';
+            document.getElementById('filter-category').value = 'All';
+            document.getElementById('filter-subcategory').value = 'All';
+            document.getElementById('filter-type').value = 'All';
+            document.getElementById('filter-year').value = 'All';
+            filterTransactions(); // Re-run the filter with all options set to 'All'
+        }
+
+        // Function to reset the application state
+        function resetApp() {
+            allTransactions = [];
+            filteredTransactions = [];
+            vpaSubcategoryMap = {};
+            subCategories = [];
+            document.getElementById('csv-upload').value = null;
+            document.getElementById('file-name').classList.add('hidden');
+            document.getElementById('file-name').classList.remove('flex');
+            document.getElementById('data-container').classList.add('hidden');
+            document.getElementById('charts-and-controls-container').classList.add('hidden');
+            document.getElementById('filter-controls').classList.add('hidden');
+            document.getElementById('search-input').value = '';
+            hideError();
+            if (categoryChart) categoryChart.destroy();
+            if (creditDebitChart) creditDebitChart.destroy();
+            if (categoryUtilizationChart) categoryUtilizationChart.destroy();
+            if (subcategoryUtilizationChart) subcategoryUtilizationChart.destroy();
+            if (vpaUtilizationChart) vpaUtilizationChart.destroy();
+        }
+
+        // Function to show/hide loading and error messages
+        function showLoading(show) {
+            const loadingElement = document.getElementById('loading');
+            if (show) {
+                loadingElement.classList.remove('hidden');
+            } else {
+                loadingElement.classList.add('hidden');
+            }
+        }
+        
+        function showError(message) {
+            const errorElement = document.getElementById('error');
+            const errorTextElement = document.getElementById('error-text');
+            errorTextElement.innerText = message;
+            errorElement.classList.remove('hidden');
+            errorElement.classList.add('flex');
+        }
+
+        function hideError() {
+            const errorElement = document.getElementById('error');
+            errorElement.classList.add('hidden');
+            errorElement.classList.remove('flex');
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('overlay');
+            sidebar.classList.toggle('open');
+            overlay.classList.toggle('open');
+        }
+
+        // Modal functions
+        function showAddCategoryModal() {
+            document.getElementById('add-category-modal').classList.remove('hidden');
+        }
+
+        function hideAddCategoryModal() {
+            document.getElementById('add-category-modal').classList.add('hidden');
+            document.getElementById('add-category-form').reset();
+        }
+
+        function showAddSubCategoryModal() {
+            document.getElementById('add-subcategory-modal').classList.remove('hidden');
+        }
+
+        function hideAddSubCategoryModal() {
+            document.getElementById('add-subcategory-modal').classList.add('hidden');
+            document.getElementById('add-subcategory-form').reset();
+        }
+
+        function showMapVpaModal(vpa) {
+            document.getElementById('vpa-to-map').value = vpa;
+            populateSubCategoryDropdown();
+            document.getElementById('map-vpa-modal').classList.remove('hidden');
+        }
+
+        function hideMapVpaModal() {
+            document.getElementById('map-vpa-modal').classList.add('hidden');
+            document.getElementById('map-vpa-form').reset();
+        }
+
+        // New function to find duplicates by checking the entire row
+        function findDuplicates(transactions) {
+            const seen = new Set();
+            const duplicates = [];
+            transactions.forEach(transaction => {
+                // Create a unique key for each transaction by joining all its values
+                const key = Object.values(transaction).join('|');
+
+                if (seen.has(key)) {
+                    duplicates.push(transaction);
+                } else {
+                    seen.add(key);
+                }
+            });
+            return duplicates;
+        }
+
+        // New function to show the duplicates modal
+        function showDuplicatesModal(duplicates) {
+            const modal = document.getElementById('duplicate-transactions-modal');
+            const listContainer = document.getElementById('duplicate-list');
+            listContainer.innerHTML = ''; // Clear previous list
+
+            duplicates.forEach(dup => {
+                const item = document.createElement('div');
+                item.className = 'p-3 mb-2 border border-gray-200 rounded-md bg-yellow-50';
+                item.innerHTML = `
+                    <p class="text-sm font-medium text-gray-800">${dup.DATE}: ${dup['TRANSACTION PARTICULARS']}</p>
+                    <p class="text-xs text-gray-600">Withdrawal: ${dup.WITHDRWAL || 'N/A'}, Deposit: ${dup.DEPOSIT || 'N/A'}</p>
+                `;
+                listContainer.appendChild(item);
+            });
+
+            modal.classList.remove('hidden');
+        }
+
+        // New function to hide the duplicates modal
+        function hideDuplicatesModal() {
+            const modal = document.getElementById('duplicate-transactions-modal');
+            modal.classList.add('hidden');
+        }
+        
+        // Function to handle chart tab switching
+        function showChart(chartId, button) {
+            document.querySelectorAll('.chart-container').forEach(container => {
+                container.classList.add('hidden');
+            });
+            document.querySelectorAll('.chart-tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            document.getElementById(`chart-${chartId}`).classList.remove('hidden');
+            button.classList.add('active');
+
+            currentActiveChartId = chartId;
+            if (filteredTransactions.length > 0) {
+                switch(chartId) {
+                    case 'category-breakdown': renderCategoryBreakdownChart(filteredTransactions); break;
+                    case 'credit-debit': renderCreditDebitChart(filteredTransactions); break;
+                    case 'category-utilization': renderCategoryUtilizationChart(); break;
+                    case 'subcategory-utilization': renderSubCategoryUtilizationChart(); break;
+                    case 'vpa-utilization': renderVpaUtilizationChart(); break;
+                }
+            }
+        }
+
+        // Add event listeners for modal forms
+        document.getElementById('add-category-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const categoryName = document.getElementById('new-category-name').value;
+            const keywordsString = document.getElementById('new-category-keywords').value;
+            const keywords = keywordsString.split(',').map(k => k.trim().toLowerCase());
+
+            if (categoryName && keywords.length > 0) {
+                categories[categoryName] = keywords;
+                allTransactions = allTransactions.map(transaction => ({
+                    ...transaction,
+                    parsed: parseTransactionParticulars(transaction['TRANSACTION PARTICULARS'])
+                }));
+                populateCategoryDropdowns();
+                filterTransactions();
+                hideAddCategoryModal();
+            } else {
+                console.error("Category name and keywords are required.");
+            }
+        });
+        
+        document.getElementById('add-subcategory-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const subCategoryName = document.getElementById('new-subcategory-name').value.trim();
+            if (subCategoryName && !subCategories.includes(subCategoryName)) {
+                subCategories.push(subCategoryName);
+                populateSubCategoryDropdowns();
+                hideAddSubCategoryModal();
+            }
+        });
+        
+        document.getElementById('map-vpa-form').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const vpa = document.getElementById('vpa-to-map').value;
+            const subCategory = document.getElementById('subcategory-dropdown').value;
+            
+            if (vpa && subCategory) {
+                vpaSubcategoryMap[vpa] = subCategory;
+                allTransactions = allTransactions.map(transaction => ({
+                    ...transaction,
+                    parsed: parseTransactionParticulars(transaction['TRANSACTION PARTICULARS'])
+                }));
+                filterTransactions();
+                hideMapVpaModal();
+            }
+        });
+
+        // Initialize Lucide icons
+        window.addEventListener('load', () => {
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

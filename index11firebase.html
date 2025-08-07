@@ -1,0 +1,2428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement Analyzer</title>
+    <!-- Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <!-- PapaParse from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- ApexCharts from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <!-- Lucide Icons from CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase variables - these will be initialized on window load
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.currentUserId = null;
+        window.currentAppId = null; // Will store __app_id
+
+        // Initialize Firebase and set up authentication
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Ensure __app_id is available from the environment
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                
+                // Firebase configuration object
+                const firebaseConfig = {
+                    apiKey: "AIzaSyCT8t_XqBR4LH4klFZa8ep-0jLy1siHpgs",
+                    authDomain: "ipbp-statement-analyzer.firebaseapp.com",
+                    projectId: "ipbp-statement-analyzer",
+                    storageBucket: "ipbp-statement-analyzer.firebasestorage.app",
+                    messagingSenderId: "92803370851",
+                    appId: "1:92803370851:web:8bdbcad70e0b28e8938d56",
+                    measurementId: "G-8F8HMDXP8H" // Optional
+                };
+
+                if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config is missing or empty. Cannot initialize Firebase.");
+                    document.getElementById('global-error-message').innerText = "App configuration missing. Please contact support.";
+                    document.getElementById('global-error-message').classList.remove('hidden');
+                    return;
+                }
+
+                window.firebaseApp = initializeApp(firebaseConfig);
+                window.db = getFirestore(window.firebaseApp);
+                window.auth = getAuth(window.firebaseApp);
+                window.currentAppId = appId;
+
+                // Listen for authentication state changes
+                onAuthStateChanged(window.auth, (user) => {
+                    if (user) {
+                        window.currentUserId = user.uid;
+                        document.getElementById('user-id-display').innerText = `User ID: ${window.currentUserId}`;
+                        document.getElementById('user-id-container').classList.remove('hidden');
+                        document.getElementById('login-page').classList.add('hidden');
+                        document.getElementById('main-app').classList.remove('hidden');
+                        console.log("User signed in:", user.uid);
+
+                        // Initialize Firestore listeners for both apps after successful authentication
+                        // Ensure IPBPApp and SBIApp are defined before calling their methods
+                        if (window.IPBPApp) window.IPBPApp.initFirestoreListeners();
+                        if (window.SBIApp) window.SBIApp.initFirestoreListeners();
+                    } else {
+                        window.currentUserId = null;
+                        document.getElementById('user-id-container').classList.add('hidden');
+                        document.getElementById('login-page').classList.remove('hidden');
+                        document.getElementById('main-app').classList.add('hidden');
+                        console.log("No user signed in.");
+                    }
+                });
+
+            } catch (mainError) {
+                console.error("Error during Firebase initialization:", mainError);
+                document.getElementById('global-error-message').innerText = `Failed to initialize app: ${mainError.message}`;
+                document.getElementById('global-error-message').classList.remove('hidden');
+            }
+        });
+
+        /** Handles Google Sign-In. */
+        window.handleGoogleSignIn = async function() { // Made globally accessible
+            const provider = new GoogleAuthProvider();
+            try {
+                await signInWithPopup(window.auth, provider);
+                // The onAuthStateChanged listener will handle UI update
+            } catch (error) {
+                console.error("Error during Google Sign-In:", error);
+                let errorMessage = "Failed to sign in with Google.";
+                if (error.code === 'auth/popup-closed-by-user') {
+                    errorMessage = "Sign-in popup closed. Please try again.";
+                } else if (error.code === 'auth/cancelled-popup-request') {
+                    errorMessage = "Sign-in already in progress or blocked. Please try again.";
+                } else if (error.code === 'auth/network-request-failed') {
+                    errorMessage = "Network error. Please check your internet connection.";
+                }
+                document.getElementById('global-error-message').innerText = errorMessage;
+                document.getElementById('global-error-message').classList.remove('hidden');
+            }
+        }
+
+        /** Handles user sign out. */
+        window.handleSignOut = async function() { // Made globally accessible
+            try {
+                await signOut(window.auth);
+                // The onAuthStateChanged listener will handle UI update
+            } catch (error) {
+                console.error("Error during sign out:", error);
+                document.getElementById('global-error-message').innerText = `Failed to sign out: ${error.message}`;
+                document.getElementById('global-error-message').classList.remove('hidden');
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            scroll-behavior: smooth;
+        }
+        .nav-button {
+            padding: 0.5rem 1.5rem;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            border: 2px solid transparent;
+        }
+        .nav-button.active {
+            background-color: #4f46e5;
+            color: #ffffff;
+            border-color: #4f46e5;
+        }
+        .nav-button:not(.active) {
+            color: #4b5563;
+            background-color: #f3f4f6;
+        }
+        .nav-button:not(.active):hover {
+            background-color: #e5e7eb;
+        }
+        .hidden-app {
+            display: none;
+        }
+        /* Generic Styles for both apps */
+        .sortable-header {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .sortable-header .sort-icon {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.3;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .sortable-header:hover .sort-icon,
+        .sortable-header.sorted .sort-icon {
+            opacity: 1;
+        }
+        /* Default: arrow up (ascending) */
+        .sortable-header .sort-icon svg {
+            transform: rotate(0deg);
+            transition: transform 0.2s ease-in-out;
+        }
+        /* When 'descending-arrow' class is present, rotate to point down */
+        .sortable-header .sort-icon.descending-arrow svg {
+            transform: rotate(180deg);
+        }
+        
+        /* Responsive sidebar toggle */
+        .sidebar {
+            transition: transform 0.3s ease-in-out;
+            transform: translateX(0);
+        }
+        @media (max-width: 1024px) {
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                z-index: 50;
+                transform: translateX(-100%);
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .overlay {
+                display: none;
+            }
+            .overlay.open {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+
+    <!-- Global Error Message -->
+    <div id="global-error-message" class="bg-red-100 text-red-700 p-4 rounded-xl flex items-center gap-2 m-4 hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+        <p id="global-error-text"></p>
+    </div>
+
+    <!-- Login Page -->
+    <div id="login-page" class="flex-grow flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 hidden">
+        <div class="bg-white p-8 rounded-xl shadow-2xl text-center max-w-md w-full">
+            <h2 class="text-3xl font-bold text-gray-800 mb-6">Welcome to Statement Analyzer</h2>
+            <p class="text-gray-600 mb-8">Please sign in to access your financial insights.</p>
+            <button onclick="handleGoogleSignIn()" class="w-full flex items-center justify-center gap-3 px-6 py-3 border border-gray-300 rounded-lg shadow-md text-lg font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google logo" class="h-6 w-6">
+                Sign in with Google
+            </button>
+        </div>
+    </div>
+
+    <!-- Main App Content (Initially hidden) -->
+    <div id="main-app" class="flex-grow flex flex-col hidden">
+        <!-- Main Navigation Bar -->
+        <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-40">
+            <nav class="container mx-auto px-4 sm:px-6 lg:px-8 py-3">
+                <div class="flex items-center justify-between">
+                     <div class="flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-area-chart text-indigo-600"><path d="M3 3v18h18"/><path d="M7 12v5h12V8l-5 5-4-4Z"/></svg>
+                        <h1 class="text-xl font-bold text-gray-800 hidden sm:block">Statement Analyzer</h1>
+                    </div>
+                    <div class="flex items-center p-1 bg-gray-200 rounded-lg">
+                        <button id="nav-ipbp" class="nav-button active" onclick="switchView('ipbp')">Post Office</button>
+                        <button id="nav-sbi" class="nav-button" onclick="switchView('sbi')">SBI</button>
+                    </div>
+                    <!-- User ID and Logout Display -->
+                    <div class="flex items-center gap-4">
+                        <div id="user-id-container" class="hidden text-sm text-gray-600 bg-gray-100 p-2 rounded-md truncate max-w-[150px] sm:max-w-none">
+                            <span id="user-id-display" class="font-medium"></span>
+                        </div>
+                        <button onclick="handleSignOut()" class="px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 transition-colors">
+                            Sign Out
+                        </button>
+                    </div>
+                </div>
+            </nav>
+        </header>
+
+        <!-- App Containers -->
+        <main class="flex-grow">
+            <!-- Post Office Bank Statement Analyzer -->
+            <div id="app-ipbp">
+                <div id="ipbp-overlay" class="fixed inset-0 bg-gray-900 bg-opacity-50 z-30 hidden lg:hidden overlay" onclick="IPBPApp.toggleSidebar()"></div>
+
+                <div class="lg:flex min-h-screen">
+                    <!-- Sidebar for filters -->
+                    <div id="ipbp-sidebar" class="sidebar w-full lg:w-80 bg-white shadow-xl lg:shadow-none p-6 space-y-8 flex-shrink-0 border-r border-gray-200">
+                        <div class="flex items-center justify-between lg:block">
+                            <h2 class="text-2xl font-bold text-gray-900">Filters</h2>
+                            <button onclick="IPBPApp.toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                        </div>
+                        <div id="ipbp-filter-controls" class="space-y-4 hidden">
+                            <div>
+                                <label for="ipbp-filter-category" class="block text-sm font-medium text-gray-700">Category</label>
+                                <select id="ipbp-filter-category" onchange="IPBPApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Categories</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ipbp-filter-subcategory" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                <select id="ipbp-filter-subcategory" onchange="IPBPApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Sub-Categories</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ipbp-filter-type" class="block text-sm font-medium text-gray-700">Transaction Type</label>
+                                <select id="ipbp-filter-type" onchange="IPBPApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Types</option>
+                                    <option value="CR">Credit</option>
+                                    <option value="DR">Debit</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="ipbp-filter-year" class="block text-sm font-medium text-gray-700">Year</label>
+                                <select id="ipbp-filter-year" onchange="IPBPApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Years</option>
+                                </select>
+                            </div>
+                            <button onclick="IPBPApp.clearFilters()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Clear Filters
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Main content area -->
+                    <div class="flex-1 p-4 sm:p-8">
+                        <div class="container mx-auto max-w-7xl">
+                            <!-- Header -->
+                            <div class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8">
+                                <div class="flex items-center justify-between">
+                                    <h1 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">
+                                        Post Office Bank Statement Analyzer
+                                    </h1>
+                                    <button onclick="IPBPApp.toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucid-filter"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    </button>
+                                </div>
+                                <p class="text-gray-600 text-lg">
+                                    Upload one or more CSV files. The analyzer will check for duplicates and only add new transactions.
+                                </p>
+                                <div class="mt-6 flex flex-col sm:flex-row items-start gap-4">
+                                    <label
+                                        for="ipbp-csv-upload"
+                                        class="w-full sm:w-auto px-6 py-3 border-2 border-dashed border-indigo-400 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors duration-200 cursor-pointer text-center font-medium"
+                                    >
+                                        <div class="flex items-center justify-center gap-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.36M16 19l-4-4-4 4M12 15v9"/></svg>
+                                            <span>Choose or Add CSV File(s)</span>
+                                        </div>
+                                        <input
+                                            id="ipbp-csv-upload"
+                                            type="file"
+                                            accept=".csv"
+                                            onchange="IPBPApp.handleFileUpload(event)"
+                                            class="hidden"
+                                            multiple
+                                        />
+                                    </label>
+                                    <div class="flex-grow">
+                                        <div id="ipbp-file-list-container" class="text-gray-600 text-sm hidden">
+                                            <div class="flex justify-between items-center mb-2">
+                                                <h3 class="font-semibold">Uploaded Files:</h3>
+                                                <button onclick="IPBPApp.resetApp()" class="text-red-500 hover:text-red-700 font-medium text-xs flex items-center gap-1">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                                                    Clear All
+                                                </button>
+                                            </div>
+                                            <div id="ipbp-file-list" class="space-y-1 max-h-24 overflow-y-auto bg-gray-50 p-2 rounded-md border">
+                                                <!-- File names will be listed here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Loading and Error states -->
+                            <div id="ipbp-loading" class="text-center p-8 text-indigo-600 hidden">
+                                <div class="flex items-center justify-center gap-2">
+                                    <svg class="animate-spin h-5 w-5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    <p id="ipbp-loading-text">Processing files...</p>
+                                </div>
+                            </div>
+                            <div id="ipbp-error" class="bg-red-100 text-red-700 p-4 rounded-xl flex items-center gap-2 hidden">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                                <p id="ipbp-error-text"></p>
+                            </div>
+
+                            <!-- Data Table and Search -->
+                            <div id="ipbp-data-container" class="bg-white shadow-xl rounded-2xl overflow-hidden hidden">
+                                <div class="p-4 sm:p-6 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                                    <h2 class="text-xl sm:text-2xl font-semibold text-gray-900">Transaction Details</h2>
+                                    <div class="relative w-full sm:w-1/3">
+                                        <input
+                                            type="text"
+                                            placeholder="Search transactions..."
+                                            id="ipbp-search-input"
+                                            onkeyup="IPBPApp.filterTransactions()"
+                                            class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                                    </div>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('DATE')">
+                                                    Transaction Date
+                                                    <span class="sort-icon" data-column="DATE">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('category')">
+                                                    Category
+                                                    <span class="sort-icon" data-column="category">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('subCategory')">
+                                                    Sub-Category
+                                                    <span class="sort-icon" data-column="subCategory">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('upiId')">
+                                                    Transaction ID
+                                                    <span class="sort-icon" data-column="upiId">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('name')">
+                                                    Particulars
+                                                    <span class="sort-icon" data-column="name">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    VPA
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Description
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('WITHDRWAL')">
+                                                    Withdrawal Amt.
+                                                    <span class="sort-icon" data-column="WITHDRWAL">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('DEPOSIT')">
+                                                    Deposit Amt.
+                                                    <span class="sort-icon" data-column="DEPOSIT">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="IPBPApp.sortTable('BALANCE')">
+                                                    Balance
+                                                    <span class="sort-icon" data-column="BALANCE">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ipbp-transactions-table-body" class="bg-white divide-y divide-gray-200">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Modals for IPBP -->
+                <div id="ipbp-add-category-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="IPBPApp.hideAddCategoryModal()"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Add New Category</h3>
+                            <form id="ipbp-add-category-form" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="ipbp-new-category-name" class="block text-sm font-medium text-gray-700">Category Name</label>
+                                    <input type="text" id="ipbp-new-category-name" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div>
+                                    <label for="ipbp-new-category-keywords" class="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
+                                    <input type="text" id="ipbp-new-category-keywords" class="mt-1 focus:ring-indigo-500 focus:border-indigo-500 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">Add Category</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="IPBPApp.hideAddCategoryModal()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="ipbp-map-vpa-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+                    <div class="flex items-center justify-center min-h-screen px-4">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75" aria-hidden="true" onclick="IPBPApp.hideMapVpaModal()"></div>
+                        <div class="bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Map VPA to Sub-Category</h3>
+                            <form id="ipbp-map-vpa-form" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="ipbp-vpa-to-map" class="block text-sm font-medium text-gray-700">VPA</label>
+                                    <input type="text" id="ipbp-vpa-to-map" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 bg-gray-100" readonly>
+                                </div>
+                                <div>
+                                    <label for="ipbp-subcategory-dropdown" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <select id="ipbp-subcategory-dropdown" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
+                                            <option value="">Select a sub-category</option>
+                                        </select>
+                                        <button type="button" class="p-2 border border-gray-300 rounded-md shadow-sm text-gray-700 hover:bg-gray-50" onclick="IPBPApp.showAddSubCategoryModal()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                 <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">Map VPA</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="IPBPApp.hideMapVpaModal()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="ipbp-add-subcategory-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+                     <div class="flex items-center justify-center min-h-screen px-4">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75" aria-hidden="true" onclick="IPBPApp.hideAddSubCategoryModal()"></div>
+                        <div class="bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Add New Sub-Category</h3>
+                            <form id="ipbp-add-subcategory-form" class="mt-4 space-y-4">
+                                 <div>
+                                    <label for="ipbp-new-subcategory-name" class="block text-sm font-medium text-gray-700">Sub-Category Name</label>
+                                    <input type="text" id="ipbp-new-subcategory-name" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3 sm:grid-flow-row-dense">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:col-start-2 sm:text-sm">Add Sub-Category</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:col-start-1 sm:text-sm" onclick="IPBPApp.hideAddSubCategoryModal()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ipbp-upload-summary-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+                    <div class="flex items-center justify-center min-h-screen px-4">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75" aria-hidden="true" onclick="IPBPApp.hideUploadSummaryModal()"></div>
+                        <div class="bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:max-w-2xl sm:w-full sm:p-6">
+                            <div class="flex items-center justify-between">
+                                 <h3 class="text-lg leading-6 font-medium text-gray-900">Upload Summary</h3>
+                                 <button type="button" class="text-gray-400 hover:text-gray-600" onclick="IPBPApp.hideUploadSummaryModal()">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                 </button>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-2">Processing complete. Here are the results for each file.</p>
+                            <div id="ipbp-upload-summary-list" class="mt-4 max-h-96 overflow-y-auto space-y-3"></div>
+                            <div class="mt-6">
+                                <button type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700" onclick="IPBPApp.hideUploadSummaryModal()">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SBI Bank Statement Analyzer -->
+            <div id="app-sbi" class="hidden-app">
+                <div id="sbi-overlay" class="fixed inset-0 bg-gray-900 bg-opacity-50 z-30 hidden lg:hidden overlay" onclick="SBIApp.toggleSidebar()"></div>
+
+                <div class="lg:flex min-h-screen">
+                    <!-- Sidebar for filters -->
+                    <div id="sbi-sidebar" class="sidebar w-full lg:w-80 bg-white shadow-xl lg:shadow-none p-6 space-y-8 flex-shrink-0 border-r border-gray-200">
+                        <div class="flex items-center justify-between lg:block">
+                            <h2 class="text-2xl font-bold text-gray-900">Filters</h2>
+                            <button onclick="SBIApp.toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                        </div>
+                        <div id="sbi-filter-controls" class="space-y-4 hidden">
+                            <div>
+                                <label for="sbi-filter-category" class="block text-sm font-medium text-gray-700">Category</label>
+                                <select id="sbi-filter-category" onchange="SBIApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Categories</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="sbi-filter-subcategory" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                <select id="sbi-filter-subcategory" onchange="SBIApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Sub-Categories</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="sbi-filter-type" class="block text-sm font-medium text-gray-700">Transaction Type</label>
+                                <select id="sbi-filter-type" onchange="SBIApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Types</option>
+                                    <option value="Credit">Credit</option>
+                                    <option value="Debit">Debit</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="sbi-filter-year" class="block text-sm font-medium text-gray-700">Year</label>
+                                <select id="sbi-filter-year" onchange="SBIApp.filterTransactions()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                                    <option value="All">All Years</option>
+                                </select>
+                            </div>
+                             <div>
+                                <button onclick="SBIApp.showAddCategoryModal()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                                    Add New Category
+                                </button>
+                            </div>
+                            <button onclick="SBIApp.clearFilters()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                Clear Filters
+                            </button>
+                        </div>
+                        <!-- Budgeting Section -->
+                        <div class="space-y-4 pt-8 border-t border-gray-200">
+                            <h2 class="text-2xl font-bold text-gray-900">Budgeting</h2>
+                            <div id="sbi-budget-summary" class="bg-gray-50 p-4 rounded-lg shadow-sm">
+                                <p class="text-sm font-medium text-gray-700 mb-2">Monthly Spending (Current Month):</p>
+                                <div id="sbi-budget-charts" class="space-y-3">
+                                    <!-- Budget charts will be rendered here -->
+                                    <p class="text-gray-500 text-sm">No budget data available. Add a budget below!</p>
+                                </div>
+                            </div>
+                            <div>
+                                <button onclick="SBIApp.showAddBudgetModal()" class="w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+                                    Add/Manage Budget
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main content area -->
+                    <div class="flex-1 p-4 sm:p-8">
+                        <div class="container mx-auto max-w-7xl">
+                            <!-- Header -->
+                            <div class="bg-white shadow-xl rounded-2xl p-6 sm:p-8 mb-8">
+                                <div class="flex items-center justify-between">
+                                    <h1 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">
+                                        SBI Bank Statement Analyzer
+                                    </h1>
+                                    <button onclick="SBIApp.toggleSidebar()" class="lg:hidden text-gray-500 hover:text-gray-700">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-filter"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    </button>
+                                </div>
+                                <p class="text-gray-600 text-lg">
+                                    Upload your SBI CSV file to expand transaction details, visualize your data, and categorize spending.
+                                </p>
+                                <div class="mt-6 flex flex-col sm:flex-row items-center gap-4">
+                                    <label
+                                        for="sbi-csv-upload"
+                                        class="w-full sm:w-auto px-6 py-3 border-2 border-dashed border-indigo-400 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors duration-200 cursor-pointer text-center font-medium"
+                                    >
+                                        <div class="flex items-center justify-center gap-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.36M16 19l-4-4-4 4M12 15v9"/></svg>
+                                            <span>Choose or Add SBI CSV file</span>
+                                        </div>
+                                        <input
+                                            id="sbi-csv-upload"
+                                            type="file"
+                                            accept=".csv"
+                                            onchange="SBIApp.handleFileUpload(event)"
+                                            class="hidden"
+                                        />
+                                    </label>
+                                    <div class="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-center">
+                                         <span id="sbi-file-name" class="text-gray-500 text-sm sm:text-base hidden items-center gap-2">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 12h8"/><path d="M8 16h8"/><path d="M8 20h5"/></svg>
+                                            <span id="sbi-file-name-text"></span>
+                                        </span>
+                                        <button
+                                            onclick="SBIApp.resetApp()"
+                                            class="w-full sm:w-auto px-4 py-2 border border-red-400 text-sm font-medium rounded-md text-red-600 bg-red-50 hover:bg-red-100 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                                        >
+                                            <div class="flex items-center justify-center gap-2">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                                                <span>Reset App</span>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Loading and Error states -->
+                            <div id="sbi-loading" class="text-center p-8 hidden">
+                                <div class="flex items-center justify-center mb-4">
+                                    <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    <p id="sbi-loading-text" class="text-indigo-600 font-medium text-lg">Processing your file...</p>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                                    <div id="sbi-progress-bar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300 ease-in-out" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                            <div id="sbi-error" class="bg-red-100 text-red-700 p-4 rounded-xl flex items-center gap-2 hidden">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                                <p id="sbi-error-text"></p>
+                            </div>
+
+                            <!-- Data Table and Search -->
+                            <div id="sbi-data-container" class="bg-white shadow-xl rounded-2xl overflow-hidden hidden">
+                                 <div class="p-4 sm:p-6 bg-white border-b border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+                                    <h2 class="text-xl sm:text-2xl font-semibold text-gray-900">Transaction Details</h2>
+                                    <div class="relative w-full sm:w-1/3">
+                                        <input
+                                            type="text"
+                                            placeholder="Search transactions..."
+                                            id="sbi-search-input"
+                                            onkeyup="SBIApp.filterTransactions()"
+                                            class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                                    </div>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('date')">
+                                                    Transaction Date
+                                                    <span class="sort-icon" data-column="date">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('category')">
+                                                    Category
+                                                    <span class="sort-icon" data-column="category">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('subCategory')">
+                                                    Sub-Category
+                                                    <span class="sort-icon" data-column="subCategory">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    VPA
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('name')">
+                                                    Particulars
+                                                    <span class="sort-icon" data-column="name">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Transaction ID
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                                    Description
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('debit')">
+                                                    Withdrawal Amt.
+                                                    <span class="sort-icon" data-column="debit">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('credit')">
+                                                    Deposit Amt.
+                                                    <span class="sort-icon" data-column="credit">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sortable-header" onclick="SBIApp.sortTable('balance')">
+                                                    Balance
+                                                    <span class="sort-icon" data-column="balance">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+                                                    </span>
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="sbi-transactions-table-body" class="bg-white divide-y divide-gray-200">
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modals for SBI -->
+                <div id="sbi-add-category-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div class="flex items-end sm:items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="SBIApp.hideAddCategoryModal()"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Add New Category</h3>
+                            <form id="sbi-add-category-form" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="sbi-new-category-name" class="block text-sm font-medium text-gray-700">Category Name</label>
+                                    <input type="text" id="sbi-new-category-name" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div>
+                                    <label for="sbi-new-category-keywords" class="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
+                                    <input type="text" id="sbi-new-category-keywords" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 pt-4 border-t border-gray-200 sm:flex sm:flex-row-reverse">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 sm:ml-3 sm:w-auto sm:text-sm">Add Category</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:w-auto sm:text-sm" onclick="SBIApp.hideAddCategoryModal()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="sbi-map-name-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                     <div class="flex items-end sm:items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="SBIApp.hideMapNameModal()"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Map Name to Sub-Category</h3>
+                            <form id="sbi-map-name-form" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="sbi-name-to-map" class="block text-sm font-medium text-gray-700">Sender/Receiver Name</label>
+                                    <input type="text" id="sbi-name-to-map" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2 bg-gray-100" readonly>
+                                </div>
+                                <div>
+                                    <label for="sbi-subcategory-dropdown" class="block text-sm font-medium text-gray-700">Sub-Category</label>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <select id="sbi-subcategory-dropdown" class="block w-full text-base border-gray-300 rounded-md" required>
+                                            <option value="">Select a sub-category</option>
+                                        </select>
+                                        <button type="button" class="p-2 border border-gray-300 rounded-md shadow-sm text-gray-700 hover:bg-gray-50" onclick="SBIApp.showAddSubCategoryModal()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-5 pt-4 border-t border-gray-200 sm:flex sm:flex-row-reverse">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 sm:ml-3 sm:w-auto sm:text-sm">Map Name</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:w-auto sm:text-sm" onclick="SBIApp.hideMapNameModal()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="sbi-add-subcategory-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div class="flex items-end sm:items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="SBIApp.hideAddSubCategoryModal()"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg font-medium text-gray-900">Add New Sub-Category</h3>
+                            <form id="sbi-add-subcategory-form" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="sbi-new-subcategory-name" class="block text-sm font-medium text-gray-700">Sub-Category Name</label>
+                                    <input type="text" id="sbi-new-subcategory-name" class="mt-1 block w-full sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div class="mt-5 pt-4 border-t border-gray-200 sm:flex sm:flex-row-reverse">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 sm:ml-3 sm:w-auto sm:text-sm">Add Sub-Category</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:w-auto sm:text-sm" onclick="SBIApp.hideAddSubCategoryModal()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="sbi-upload-summary-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                     <div class="flex items-end sm:items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="SBIApp.hideUploadSummaryModal()"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                            <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                                <div class="sm:flex sm:items-start">
+                                    <div class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-green-100 sm:mx-0 sm:h-10 sm:w-10">
+                                        <svg class="h-6 w-6 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                    </div>
+                                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">File Upload Complete</h3>
+                                        <div class="mt-2">
+                                            <p id="sbi-upload-summary-text" class="text-sm text-gray-500"></p>
+                                            <div id="sbi-duplicates-list-container" class="mt-4 max-h-40 overflow-y-auto border rounded-md p-2 hidden text-left">
+                                                <h4 class="font-semibold text-sm text-gray-800 mb-2">Skipped Duplicates:</h4>
+                                                <ul id="sbi-duplicates-list" class="list-disc pl-5 text-xs text-gray-600 space-y-1"></ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                                <button type="button" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-indigo-600 text-base font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm" onclick="SBIApp.hideUploadSummaryModal()">OK</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Budgeting Modal -->
+                <div id="sbi-add-budget-modal" class="fixed inset-0 z-50 overflow-y-auto hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+                    <div class="flex items-end sm:items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onclick="SBIApp.hideAddBudgetModal()"></div>
+                        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+                        <div class="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Add/Manage Monthly Budget</h3>
+                            <form id="sbi-add-budget-form" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="sbi-budget-month" class="block text-sm font-medium text-gray-700">Month</label>
+                                    <input type="month" id="sbi-budget-month" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" required>
+                                </div>
+                                <div>
+                                    <label for="sbi-budget-category" class="block text-sm font-medium text-gray-700">Category</label>
+                                    <select id="sbi-budget-category" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
+                                        <option value="">Select a category</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="sbi-budget-amount" class="block text-sm font-medium text-gray-700">Budget Amount</label>
+                                    <input type="number" id="sbi-budget-amount" class="mt-1 block w-full shadow-sm sm:text-sm border-gray-300 rounded-md p-2" min="0" step="0.01" required>
+                                </div>
+                                <div class="mt-5 pt-4 border-t border-gray-200 sm:flex sm:flex-row-reverse">
+                                    <button type="submit" class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-purple-600 text-base font-medium text-white hover:bg-purple-700 sm:ml-3 sm:w-auto sm:text-sm">Save Budget</button>
+                                    <button type="button" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 sm:mt-0 sm:w-auto sm:text-sm" onclick="SBIApp.hideAddBudgetModal()">Cancel</button>
+                                </div>
+                            </form>
+                            <div class="mt-6 border-t pt-4 border-gray-200">
+                                <h4 class="text-md font-medium text-gray-900 mb-2">Existing Budgets:</h4>
+                                <ul id="sbi-existing-budgets" class="space-y-2 max-h-40 overflow-y-auto">
+                                    <!-- Existing budgets will be listed here -->
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+    
+    <script type="module">
+        import { getFirestore, doc, addDoc, setDoc, updateDoc, onSnapshot, collection, query, where, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global utility function to parse dates robustly
+        function parseDateString(dateStr) {
+            if (!dateStr) return new Date(NaN);
+
+            // Handle "DD-Mon-YY" format (e.g., "01-Jan-23")
+            const parts = dateStr.split('-');
+            if (parts.length === 3) {
+                const day = parseInt(parts[0]);
+                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                const month = monthNames.findIndex(m => m.toLowerCase() === parts[1].toLowerCase());
+                let year = parseInt(parts[2]);
+                // Assume 2-digit years are in the 2000s
+                if (year < 100) {
+                    year += 2000;
+                }
+                if (month !== -1 && !isNaN(day) && !isNaN(year)) {
+                    return new Date(year, month, day);
+                }
+            }
+
+            // Attempt to parse other common formats
+            const date = new Date(dateStr);
+            if (!isNaN(date.getTime())) {
+                return date;
+            }
+
+            return new Date(NaN); // Return invalid date if parsing fails
+        }
+
+        // Global navigation function
+        window.switchView = function(viewName) { // Made globally accessible
+            const ipbpApp = document.getElementById('app-ipbp');
+            const sbiApp = document.getElementById('app-sbi');
+            
+            document.querySelectorAll('.nav-button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`nav-${viewName}`).classList.add('active');
+
+            ipbpApp.classList.add('hidden-app');
+            sbiApp.classList.add('hidden-app');
+
+            if (viewName === 'ipbp') {
+                ipbpApp.classList.remove('hidden-app');
+            } else if (viewName === 'sbi') {
+                sbiApp.classList.remove('hidden-app');
+            }
+        }
+
+        // --- IPBP (Post Office) App Logic ---
+        window.IPBPApp = { // Made globally accessible
+            allTransactions: [],
+            filteredTransactions: [],
+            uniqueTransactionSet: new Set(),
+            uploadedFileNames: [],
+            currentSortColumn: null,
+            currentSortDirection: 'asc', // 'asc' for ascending, 'desc' for descending
+            categories: {
+                'UPI Transaction': ['upi'],
+                'Bank Fee': ['fee', 'charge'],
+                'Initial Deposit': ['initial cash deposit'],
+                'PLI Transaction': ['pli'],
+                'Interest': ['int.pd:']
+            },
+            subCategories: [], // Global sub-categories from public collection
+            vpaSubcategoryMap: {}, // User-specific VPA to sub-category mappings from Firestore
+
+            /**
+             * Initializes Firestore listeners for IPBP transactions, VPA mappings, and sub-categories.
+             * This method is called after Firebase authentication is complete.
+             */
+            initFirestoreListeners() {
+                if (!window.db || !window.currentUserId || !window.currentAppId) {
+                    console.warn("Firestore not ready for IPBPApp. Retrying...");
+                    setTimeout(() => this.initFirestoreListeners(), 1000); // Retry after 1 second
+                    return;
+                }
+
+                const ipbpTransactionsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/ipbp_transactions`);
+                const subCategoriesRef = collection(window.db, `artifacts/${window.currentAppId}/public/data/sub_categories`);
+                const vpaMappingsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/ipbp_vpa_subcategory_mappings`);
+
+
+                // Listen for IPBP transactions
+                onSnapshot(ipbpTransactionsRef, (snapshot) => {
+                    const transactionsFromDb = [];
+                    const uniqueKeysFromDb = new Set();
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        // Reconstruct the unique key for comparison
+                        const uniqueKey = [
+                            (data.parsed.upiId || 'N/A').trim().toLowerCase(),
+                            (data.DATE || '').trim().toLowerCase(),
+                            (data['TRANSACTION PARTICULARS'] || '').trim().toLowerCase(),
+                            this.parseAmount(data.BALANCE).toFixed(2)
+                        ].join('|');
+                        uniqueKeysFromDb.add(uniqueKey);
+                        transactionsFromDb.push({ id: doc.id, ...data });
+                    });
+                    this.allTransactions = transactionsFromDb;
+                    this.uniqueTransactionSet = uniqueKeysFromDb; // Update the unique set
+                    this.allTransactions.sort((a, b) => parseDateString(b.DATE).getTime() - parseDateString(a.DATE).getTime());
+                    this.reapplyMappingsAndFilter(); // Reapply mappings and then filter
+                    this.populateAllDropdowns();
+                    console.log("IPBP Transactions updated from Firestore.");
+                    if (this.allTransactions.length > 0) {
+                        document.getElementById('ipbp-data-container').classList.remove('hidden');
+                        document.getElementById('ipbp-filter-controls').classList.remove('hidden');
+                    }
+                }, (error) => {
+                    console.error("Error listening to IPBP transactions:", error);
+                    this.showError("Failed to load IPBP transactions from cloud. Please try again.");
+                });
+
+                // Listen for common sub-categories
+                onSnapshot(subCategoriesRef, (snapshot) => {
+                    const subCatsFromDb = [];
+                    snapshot.forEach(doc => {
+                        subCatsFromDb.push(doc.data().name);
+                    });
+                    this.subCategories = subCatsFromDb;
+                    this.populateSubCategoryDropdown(); // Update modal dropdown
+                    this.populateAllDropdowns(); // Update filter dropdown
+                    console.log("Sub-categories updated from Firestore.");
+                }, (error) => {
+                    console.error("Error listening to sub-categories:", error);
+                    this.showError("Failed to load sub-categories from cloud. Please try again.");
+                });
+
+                // Listen for user-specific VPA mappings
+                onSnapshot(vpaMappingsRef, (snapshot) => {
+                    this.vpaSubcategoryMap = {}; // Clear existing map
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        this.vpaSubcategoryMap[data.vpa] = data.subCategory;
+                    });
+                    this.reapplyMappingsAndFilter(); // Reapply mappings based on updated map
+                    console.log("IPBP VPA mappings updated from Firestore:", this.vpaSubcategoryMap);
+                }, (error) => {
+                    console.error("Error listening to IPBP VPA mappings:", error);
+                    this.showError("Failed to load VPA mappings from cloud. Please try again.");
+                });
+            },
+
+            /**
+             * Reapplies categorization and VPA mappings to all transactions and then filters.
+             * This is called when transactions or mappings are updated from Firestore.
+             */
+            reapplyMappingsAndFilter() {
+                this.allTransactions.forEach(t => {
+                    // Re-parse to apply any new category/keyword rules
+                    t.parsed = this.parseTransactionParticulars(t['TRANSACTION PARTICULARS']);
+                    // Apply VPA mapping from the loaded map
+                    if (t.parsed.vpa !== 'N/A' && this.vpaSubcategoryMap[t.parsed.vpa]) {
+                        t.parsed.subCategory = this.vpaSubcategoryMap[t.parsed.vpa];
+                    }
+                });
+                this.filterTransactions(); // Re-filter and render with updated data
+            },
+
+            /**
+             * Parses a string amount (e.g., "1,000.00") into a float.
+             * @param {string|number} amount - The amount string or number.
+             * @returns {number} The parsed float amount, or 0 if invalid.
+             */
+            parseAmount(amount) {
+                return parseFloat(String(amount).replace(/,/g, '')) || 0;
+            },
+
+            /**
+             * Parses transaction particulars string to extract structured details.
+             * @param {string} particulars - The raw transaction particulars string.
+             * @returns {object} Parsed transaction details.
+             */
+            parseTransactionParticulars(particulars) {
+                const normalizedParticulars = (particulars || '').replace(/\//g, '~').toLowerCase();
+                let parsedDetails = {
+                    type: 'Other', upiId: 'N/A', transactionType: 'N/A', name: 'N/A',
+                    vpa: 'N/A', description: particulars, category: 'Other', subCategory: 'N/A'
+                };
+
+                // Existing hardcoded categorization logic
+                if (normalizedParticulars.startsWith('upi~')) {
+                    const parts = particulars.split('~');
+                    parsedDetails.type = 'UPI';
+                    parsedDetails.upiId = parts[1] ? parts[1].trim() : 'N/A';
+                    parsedDetails.transactionType = parts[2] ? parts[2].trim() : 'N/A';
+                    parsedDetails.name = parts[3] ? parts[3].trim() : 'N/A';
+                    parsedDetails.vpa = parts[5] ? parts[5].trim() : 'N/A';
+                    parsedDetails.description = parts.slice(6).join('~') || 'N/A';
+                    parsedDetails.category = 'UPI Transaction';
+                } else if (normalizedParticulars.includes('pli~')) {
+                    const parts = particulars.split('~');
+                    parsedDetails.type = 'PLI Transaction';
+                    parsedDetails.upiId = parts[1] ? parts[1].trim() : 'N/A';
+                    parsedDetails.name = parts[2] ? parts[2].trim() : 'N/A';
+                    parsedDetails.description = parts.slice(3).join('~') || 'N/A';
+                    parsedDetails.transactionType = 'CR';
+                    parsedDetails.category = 'PLI Transaction';
+                } else if (normalizedParticulars.includes('int.pd:')) {
+                    const parts = particulars.split(':');
+                    parsedDetails.type = 'Interest Paid';
+                    parsedDetails.description = `Interest paid for period: ${parts[1] ? parts[1].trim() : 'N/A'}`;
+                    parsedDetails.transactionType = 'CR';
+                    parsedDetails.category = 'Interest';
+                } else if (normalizedParticulars.includes('initial cash deposit')) {
+                    parsedDetails.type = 'Cash Deposit';
+                    parsedDetails.description = 'Initial Cash Deposit';
+                    parsedDetails.transactionType = 'CR';
+                    parsedDetails.category = 'Initial Deposit';
+                } else if (normalizedParticulars.includes('sb account opening fees') || normalizedParticulars.includes('debit card issuance fee')) {
+                    parsedDetails.type = 'Bank Fee';
+                    parsedDetails.description = particulars;
+                    parsedDetails.transactionType = 'DR';
+                    parsedDetails.category = 'Bank Fee';
+                } else {
+                    // Categorize based on keywords
+                    for (const category in this.categories) {
+                        if (this.categories[category].some(keyword => normalizedParticulars.includes(keyword))) {
+                            parsedDetails.category = category;
+                            break;
+                        }
+                    }
+                }
+                // Apply sub-category mapping from the loaded map
+                if (parsedDetails.vpa !== 'N/A' && this.vpaSubcategoryMap[parsedDetails.vpa]) {
+                    parsedDetails.subCategory = this.vpaSubcategoryMap[parsedDetails.vpa];
+                }
+                return parsedDetails;
+            },
+
+            /**
+             * Renders the transaction table with the given data.
+             * @param {Array<object>} data - The array of transaction objects to display.
+             */
+            renderTable(data) {
+                const tableBody = document.getElementById('ipbp-transactions-table-body');
+                tableBody.innerHTML = ''; // Clear existing rows
+                if (data.length === 0) {
+                    tableBody.innerHTML = `<tr><td colspan="10" class="px-6 py-4 text-center text-sm text-gray-500">No transactions found.</td></tr>`;
+                    return;
+                }
+                data.forEach(transaction => {
+                    const parsed = transaction.parsed;
+                    const typeClass = parsed.transactionType === 'CR' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                    const subCatText = parsed.subCategory !== 'N/A' ? `<span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">${parsed.subCategory}</span>` : '-';
+                    const vpaCell = parsed.vpa !== 'N/A' ? `<button onclick="IPBPApp.showMapVpaModal('${parsed.vpa}')" class="text-blue-600 hover:text-blue-800 font-medium">${parsed.vpa}</button>` : '-';
+                    const withdrawalValue = this.parseAmount(transaction.WITHDRWAL) > 0 ? this.parseAmount(transaction.WITHDRWAL).toFixed(2) : '-';
+                    const depositValue = this.parseAmount(transaction.DEPOSIT) > 0 ? this.parseAmount(transaction.DEPOSIT).toFixed(2) : '-';
+                    const balanceValue = this.parseAmount(transaction.BALANCE) > 0 ? this.parseAmount(transaction.BALANCE).toFixed(2) : '-'; // Assuming BALANCE exists
+
+                    const row = `
+                        <tr class="hover:bg-gray-50 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${transaction.DATE}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm"><span class="px-2 py-1 rounded-full text-xs font-semibold ${typeClass}">${parsed.category} (${parsed.transactionType || 'N/A'})</span></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${subCatText}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${parsed.upiId || '-'}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${parsed.name || 'N/A'}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${vpaCell}</td>
+                            <td class="px-6 py-4 text-sm">${parsed.description}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${withdrawalValue}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${depositValue}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">${balanceValue}</td>
+                        </tr>`;
+                    tableBody.innerHTML += row;
+                });
+            },
+
+            /**
+             * Sorts the transaction table by the specified column.
+             * @param {string} column - The column key to sort by.
+             */
+            sortTable(column) {
+                // Toggle sort direction if the same column is clicked
+                if (this.currentSortColumn === column) {
+                    this.currentSortDirection = this.currentSortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    // Reset to ascending if a new column is clicked
+                    this.currentSortColumn = column;
+                    this.currentSortDirection = 'asc';
+                }
+
+                // Update sort icons visibility and direction
+                document.querySelectorAll('#app-ipbp .sortable-header .sort-icon').forEach(icon => {
+                    icon.classList.remove('descending-arrow'); // Remove any existing direction class
+                    icon.style.opacity = '0.3'; // Reset opacity
+                });
+                const currentHeader = document.querySelector(`#app-ipbp .sortable-header[onclick="IPBPApp.sortTable('${column}')"]`);
+                const currentIcon = currentHeader ? currentHeader.querySelector('.sort-icon') : null;
+
+                if (currentIcon) {
+                    currentIcon.style.opacity = '1'; // Make current icon visible
+                    if (this.currentSortDirection === 'desc') {
+                        currentIcon.classList.add('descending-arrow'); // Add class to point down
+                    }
+                }
+
+                // Sort the filtered transactions
+                this.filteredTransactions.sort((a, b) => {
+                    let aValue, bValue;
+                    if (column === 'DATE') {
+                        aValue = parseDateString(a[column]).getTime();
+                        bValue = parseDateString(b[column]).getTime();
+                    } else if (['category', 'subCategory', 'upiId', 'name'].includes(column)) {
+                        aValue = a.parsed[column];
+                        bValue = b.parsed[column];
+                    } else {
+                        aValue = this.parseAmount(a[column]); // Use parseAmount for numeric columns
+                        bValue = this.parseAmount(b[column]);
+                    }
+
+                    const factor = this.currentSortDirection === 'asc' ? 1 : -1;
+
+                    // Handle numeric and string comparisons
+                    if (typeof aValue === 'number' && typeof bValue === 'number' && !isNaN(aValue) && !isNaN(bValue)) {
+                        return (aValue - bValue) * factor;
+                    }
+                    return String(aValue).localeCompare(String(bValue)) * factor;
+                });
+                this.renderTable(this.filteredTransactions);
+            },
+            
+            /**
+             * Handles the file upload process, parsing CSVs and adding transactions to Firestore.
+             * @param {Event} event - The file input change event.
+             */
+            async handleFileUpload(event) {
+                const files = event.target.files;
+                if (!files.length) return;
+
+                if (!window.db || !window.currentUserId) {
+                    this.showError("App not initialized. Please wait for Firebase to load.");
+                    return;
+                }
+
+                this.showLoading(true, `Processing ${files.length} file(s)...`);
+                this.hideError();
+                
+                const uploadSummaries = [];
+                const ipbpTransactionsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/ipbp_transactions`);
+
+                for (const file of files) {
+                    // Skip if file already uploaded
+                    if (this.uploadedFileNames.includes(file.name)) {
+                        uploadSummaries.push({
+                            fileName: file.name,
+                            newCount: 0,
+                            duplicateCount: 'N/A',
+                            status: 'skipped'
+                        });
+                        continue;
+                    }
+
+                    try {
+                        const results = await new Promise((resolve, reject) => {
+                            Papa.parse(file, {
+                                header: true,
+                                skipEmptyLines: true,
+                                complete: resolve,
+                                error: reject
+                            });
+                        });
+
+                        let newCount = 0;
+                        let duplicateCount = 0;
+                        const transactionsToUpload = [];
+
+                        results.data.forEach(row => {
+                            // Ensure essential columns exist
+                            if (row['TRANSACTION PARTICULARS'] && row['DATE'] && (row['WITHDRWAL'] !== undefined || row['DEPOSIT'] !== undefined)) {
+                                // Apply current mappings during initial parsing
+                                const parsed = this.parseTransactionParticulars(row['TRANSACTION PARTICULARS']);
+                                
+                                // More robust unique key based on: Transaction ID (UPI ID), Date, Transaction Particulars, and Balance
+                                // Normalize strings (trim, lowercase) and numbers (toFixed) for consistent comparison
+                                const uniqueKey = [
+                                    (parsed.upiId || 'N/A').trim().toLowerCase(),
+                                    (row['DATE'] || '').trim().toLowerCase(),
+                                    (row['TRANSACTION PARTICULARS'] || '').trim().toLowerCase(),
+                                    this.parseAmount(row['BALANCE']).toFixed(2)
+                                ].join('|');
+                                
+                                if (this.uniqueTransactionSet.has(uniqueKey)) {
+                                    duplicateCount++;
+                                } else {
+                                    this.uniqueTransactionSet.add(uniqueKey);
+                                    
+                                    const newTransaction = {
+                                        ...row,
+                                        WITHDRWAL: this.parseAmount(row.WITHDRWAL),
+                                        DEPOSIT: this.parseAmount(row.DEPOSIT),
+                                        BALANCE: this.parseAmount(row.BALANCE), // Ensure BALANCE is parsed
+                                        parsed: parsed,
+                                        timestamp: new Date() // Add a timestamp for ordering
+                                    };
+                                    transactionsToUpload.push(newTransaction);
+                                    newCount++;
+                                }
+                            }
+                        });
+                        
+                        // Upload new transactions to Firestore
+                        for (const transaction of transactionsToUpload) {
+                            await addDoc(ipbpTransactionsRef, transaction);
+                        }
+
+                        this.uploadedFileNames.push(file.name);
+                        uploadSummaries.push({ fileName: file.name, newCount, duplicateCount, status: 'processed' });
+
+                    } catch (err) {
+                        uploadSummaries.push({ fileName: file.name, error: err.message, status: 'error' });
+                        this.showError(`Error processing ${file.name}. Please check the file format or console for details.`);
+                        console.error(`Error processing ${file.name}:`, err);
+                    }
+                }
+                
+                this.updateUIafterUpload(uploadSummaries);
+                document.getElementById('ipbp-csv-upload').value = null; // Reset file input
+            },
+
+            /**
+             * Updates the UI after file upload, including table, dropdowns, and dashboard.
+             * @param {Array<object>} summaries - Array of upload summary objects for each file.
+             */
+            updateUIafterUpload(summaries) {
+                // Sorting and filtering are handled by the onSnapshot listener after data is uploaded
+                this.showLoading(false);
+                
+                // Show uploaded file list
+                document.getElementById('ipbp-file-list-container').classList.remove('hidden');
+                const fileListEl = document.getElementById('ipbp-file-list');
+                fileListEl.innerHTML = this.uploadedFileNames.map(name => `<div class="text-xs truncate">${name}</div>`).join('');
+                
+                this.showUploadSummaryModal(summaries);
+            },
+
+            /**
+             * Filters transactions based on search term and selected dropdown values.
+             */
+            filterTransactions() {
+                const searchTerm = document.getElementById('ipbp-search-input').value.toLowerCase();
+                const fCat = document.getElementById('ipbp-filter-category').value;
+                const fSub = document.getElementById('ipbp-filter-subcategory').value;
+                const fType = document.getElementById('ipbp-filter-type').value;
+                const fYear = document.getElementById('ipbp-filter-year').value;
+                
+                this.filteredTransactions = this.allTransactions.filter(t => {
+                    const p = t.parsed;
+                    const d = parseDateString(t.DATE);
+                    
+                    // Check if any value in the transaction or its parsed details matches the search term
+                    const matchesSearch = Object.values(t).some(v => String(v).toLowerCase().includes(searchTerm)) ||
+                                          Object.values(p).some(v => String(v).toLowerCase().includes(searchTerm));
+
+                    // Check against filter criteria
+                    const matchesCategory = (fCat === 'All' || p.category === fCat);
+                    const matchesSubCategory = (fSub === 'All' || p.subCategory === fSub);
+                    const matchesType = (fType === 'All' || p.transactionType === fType);
+                    const matchesYear = (fYear === 'All' || (!isNaN(d.getFullYear()) && d.getFullYear().toString() === fYear));
+
+                    return matchesSearch && matchesCategory && matchesSubCategory && matchesType && matchesYear;
+                });
+                this.renderTable(this.filteredTransactions);
+            },
+            
+            /**
+             * Clears all filters and re-renders the table.
+             */
+            clearFilters() {
+                document.getElementById('ipbp-search-input').value = '';
+                document.getElementById('ipbp-filter-category').value = 'All';
+                document.getElementById('ipbp-filter-subcategory').value = 'All';
+                document.getElementById('ipbp-filter-type').value = 'All';
+                document.getElementById('ipbp-filter-year').value = 'All';
+                this.filterTransactions();
+            },
+
+            /**
+             * Resets the IPBP application to its initial state.
+             * Note: This will only clear local state, not Firestore data.
+             */
+            resetApp() {
+                this.allTransactions = []; // This will be repopulated by onSnapshot
+                this.filteredTransactions = [];
+                this.uniqueTransactionSet.clear();
+                this.uploadedFileNames = [];
+                document.getElementById('ipbp-csv-upload').value = null;
+                ['ipbp-file-list-container', 'ipbp-data-container', 'ipbp-filter-controls', 'ipbp-error'].forEach(id => document.getElementById(id).classList.add('hidden'));
+                this.renderTable([]); // Clear table display
+            },
+            
+            /**
+             * Shows or hides the loading indicator.
+             * @param {boolean} show - True to show, false to hide.
+             * @param {string} text - The text to display in the loading indicator.
+             */
+            showLoading(show, text) { 
+                document.getElementById('ipbp-loading-text').innerText = text;
+                document.getElementById('ipbp-loading').classList.toggle('hidden', !show); 
+            },
+            /**
+             * Displays an error message.
+             * @param {string} message - The error message to display.
+             */
+            showError(message) { 
+                document.getElementById('ipbp-error-text').innerText = message; 
+                document.getElementById('ipbp-error').classList.remove('hidden'); 
+            },
+            /** Hides the error message. */
+            hideError() {
+                document.getElementById('ipbp-error').classList.add('hidden');
+            },
+            /** Toggles the visibility of the sidebar and its overlay. */
+            toggleSidebar() { 
+                document.getElementById('ipbp-sidebar').classList.toggle('open'); 
+                document.getElementById('ipbp-overlay').classList.toggle('open'); 
+            },
+            
+            // Modal functions
+            showAddCategoryModal() { document.getElementById('ipbp-add-category-modal').classList.remove('hidden'); },
+            hideAddCategoryModal() { document.getElementById('ipbp-add-category-modal').classList.add('hidden'); document.getElementById('ipbp-add-category-form').reset(); },
+            showAddSubCategoryModal() { document.getElementById('ipbp-add-subcategory-modal').classList.remove('hidden'); },
+            hideAddSubCategoryModal() { document.getElementById('ipbp-add-subcategory-modal').classList.add('hidden'); document.getElementById('ipbp-add-subcategory-form').reset(); },
+            showMapVpaModal(vpa) { document.getElementById('ipbp-vpa-to-map').value = vpa; this.populateSubCategoryDropdown(); document.getElementById('ipbp-map-vpa-modal').classList.remove('hidden'); },
+            hideMapVpaModal() { document.getElementById('ipbp-map-vpa-modal').classList.add('hidden'); document.getElementById('ipbp-map-vpa-form').reset(); },
+            /**
+             * Shows the upload summary modal with details for each processed file.
+             * @param {Array<object>} summaries - Array of upload summary objects.
+             */
+            showUploadSummaryModal(summaries) {
+                const listEl = document.getElementById('ipbp-upload-summary-list');
+                listEl.innerHTML = summaries.map(s => {
+                    let statusText = '';
+                    let bgColor = 'bg-gray-50';
+                    if (s.status === 'processed') {
+                        statusText = `<span class="text-green-600">${s.newCount} new</span>, <span class="text-yellow-600">${s.duplicateCount} duplicates</span>`;
+                        bgColor = 'bg-green-50';
+                    } else if (s.status === 'skipped') {
+                        statusText = `<span class="text-blue-600">Skipped (already uploaded)</span>`;
+                        bgColor = 'bg-blue-50';
+                    } else { // error
+                        statusText = `<span class="text-red-600">Error: ${s.error}</span>`;
+                        bgColor = 'bg-red-50';
+                    }
+                    return `<div class="p-3 border rounded-md ${bgColor}"><p class="font-medium text-sm text-gray-800 truncate">${s.fileName}</p><p class="text-xs text-gray-600">${statusText}</p></div>`;
+                }).join('');
+                document.getElementById('ipbp-upload-summary-modal').classList.remove('hidden');
+            },
+            hideUploadSummaryModal() { document.getElementById('ipbp-upload-summary-modal').classList.add('hidden'); },
+            
+            /**
+             * Populates the sub-category dropdown in modals.
+             */
+            populateSubCategoryDropdown() {
+                const dropdown = document.getElementById('ipbp-subcategory-dropdown');
+                dropdown.innerHTML = '<option value="">Select a sub-category</option>';
+                this.subCategories.sort().forEach(sc => dropdown.innerHTML += `<option value="${sc}">${sc}</option>`);
+            },
+
+            /**
+             * Populates all filter dropdowns (category, sub-category, year).
+             */
+            populateAllDropdowns() {
+                // Populate Category filter
+                this.populateDropdown('ipbp-filter-category', Object.keys(this.categories));
+                // Populate Sub-Category filter
+                this.populateDropdown('ipbp-filter-subcategory', this.allTransactions.map(t => t.parsed.subCategory).filter(sc => sc !== 'N/A'), true);
+
+                // Populate Year filter
+                const yearFilter = document.getElementById('ipbp-filter-year');
+                yearFilter.innerHTML = '<option value="All">All Years</option>';
+                [...new Set(this.allTransactions.map(t => parseDateString(t.DATE).getFullYear()))]
+                    .filter(y => !isNaN(y))
+                    .sort((a, b) => a - b) // Sort years numerically
+                    .forEach(year => yearFilter.innerHTML += `<option value="${year}">${year}</option>`);
+            },
+
+            /**
+             * Generic helper to populate a select dropdown.
+             * @param {string} selectId - The ID of the select element.
+             * @param {Array<string>} data - The array of data to populate.
+             * @param {boolean} isSub - True if it's a sub-category dropdown, for label text.
+             */
+            populateDropdown(selectId, data, isSub = false) {
+                const select = document.getElementById(selectId);
+                select.innerHTML = `<option value="All">All ${isSub ? 'Sub-Categories' : 'Categories'}</option>`;
+                [...new Set(data)].sort().forEach(item => select.innerHTML += `<option value="${item}">${item}</option>`);
+            },
+        };
+
+        // --- SBI App Logic ---
+        window.SBIApp = { // Made globally accessible
+            allTransactions: [],
+            uniqueTransactionSet: new Set(),
+            filteredTransactions: [],
+            currentSortColumn: null,
+            currentSortDirection: 'asc', // 'asc' for ascending, 'desc' for descending
+            // columnMap will store the actual CSV header names mapped to our internal standard keys
+            columnMap: { date: '', description: '', debit: '', credit: '', balance: '' },
+            categories: {
+                'UPI Transfer': ['upi/dr/', 'upi/cr/', 'upi~', '~dr~', '~cr~'],
+                'NEFT/IMPS Transfer': ['neft', 'imps'],
+                'Card Payment': ['pos/dr/'],
+                'ATM Withdrawal': ['atm wdl', 'cash wdl'],
+                'Interest': ['int. pd.'],
+                'Cheque Payment': ['chq.paid'],
+                'Bank Charges': ['bank charges', 'gst'],
+                'Salary Credit': ['salary']
+            },
+            subCategories: [], // Global sub-categories from public collection
+            nameSubcategoryMap: {}, // User-specific name to sub-category mappings from Firestore
+            budgets: [], // User-specific budgets from Firestore
+
+            /**
+             * Initializes Firestore listeners for SBI transactions, name mappings, sub-categories, and budgets.
+             * This method is called after Firebase authentication is complete.
+             */
+            initFirestoreListeners() {
+                if (!window.db || !window.currentUserId || !window.currentAppId) {
+                    console.warn("Firestore not ready for SBIApp. Retrying...");
+                    setTimeout(() => this.initFirestoreListeners(), 1000); // Retry after 1 second
+                    return;
+                }
+
+                const sbiTransactionsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/sbi_transactions`);
+                const subCategoriesRef = collection(window.db, `artifacts/${window.currentAppId}/public/data/sub_categories`);
+                const nameMappingsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/sbi_name_subcategory_mappings`);
+                const budgetsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/budgets`);
+
+                // Listen for SBI transactions
+                onSnapshot(sbiTransactionsRef, (snapshot) => {
+                    const transactionsFromDb = [];
+                    const uniqueKeysFromDb = new Set();
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        // Reconstruct the unique key for comparison
+                        const uniqueKey = `${data.date}|${data.description}|${this.parseAmount(data.debit)}|${this.parseAmount(data.credit)}|${this.parseAmount(data.balance)}`;
+                        uniqueKeysFromDb.add(uniqueKey);
+                        transactionsFromDb.push({ id: doc.id, ...data });
+                    });
+                    this.allTransactions = transactionsFromDb;
+                    this.uniqueTransactionSet = uniqueKeysFromDb; // Update the unique set
+                    this.allTransactions.sort((a, b) => parseDateString(b.date).getTime() - parseDateString(a.date).getTime());
+                    this.reapplyMappingsAndFilter(); // Reapply mappings and then filter
+                    this.populateAllDropdowns();
+                    this.renderBudgetCharts(); // Update budget charts
+                    console.log("SBI Transactions updated from Firestore.");
+                    if (this.allTransactions.length > 0) {
+                        document.getElementById('sbi-data-container').classList.remove('hidden');
+                        document.getElementById('sbi-filter-controls').classList.remove('hidden');
+                    }
+                }, (error) => {
+                    console.error("Error listening to SBI transactions:", error);
+                    this.showError("Failed to load SBI transactions from cloud. Please try again.");
+                });
+
+                // Listen for common sub-categories
+                onSnapshot(subCategoriesRef, (snapshot) => {
+                    const subCatsFromDb = [];
+                    snapshot.forEach(doc => {
+                        subCatsFromDb.push(doc.data().name);
+                    });
+                    this.subCategories = subCatsFromDb;
+                    this.populateSubCategoryDropdown(); // Update modal dropdown
+                    this.populateAllDropdowns(); // Update filter dropdown
+                    console.log("Sub-categories updated from Firestore (SBI listener).");
+                }, (error) => {
+                    console.error("Error listening to sub-categories (SBI listener):", error);
+                });
+
+                // Listen for user-specific Name mappings
+                onSnapshot(nameMappingsRef, (snapshot) => {
+                    this.nameSubcategoryMap = {}; // Clear existing map
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        this.nameSubcategoryMap[data.name] = data.subCategory;
+                    });
+                    this.reapplyMappingsAndFilter(); // Reapply mappings based on updated map
+                    console.log("SBI Name mappings updated from Firestore:", this.nameSubcategoryMap);
+                }, (error) => {
+                    console.error("Error listening to SBI Name mappings:", error);
+                    this.showError("Failed to load Name mappings from cloud. Please try again.");
+                });
+
+                // Listen for user-specific Budgets
+                onSnapshot(budgetsRef, (snapshot) => {
+                    this.budgets = []; // Clear existing budgets
+                    snapshot.forEach(doc => {
+                        this.budgets.push({ id: doc.id, ...doc.data() });
+                    });
+                    this.renderBudgetCharts(); // Re-render budget charts with updated data
+                    this.populateBudgetCategoryDropdown(); // Update budget modal dropdown
+                    this.renderExistingBudgetsList(); // Update list in budget modal
+                    console.log("SBI Budgets updated from Firestore:", this.budgets);
+                }, (error) => {
+                    console.error("Error listening to SBI Budgets:", error);
+                    this.showError("Failed to load budgets from cloud. Please try again.");
+                });
+            },
+
+            /**
+             * Reapplies categorization and name mappings to all transactions and then filters.
+             * This is called when transactions or mappings are updated from Firestore.
+             */
+            reapplyMappingsAndFilter() {
+                this.allTransactions.forEach(t => {
+                    // Re-parse to apply any new category/keyword rules and current name mappings
+                    t.parsed = this.parseSBIParticulars(t.description, t.debit, t.credit);
+                    // The parseSBIParticulars function already applies the nameSubcategoryMap
+                });
+                this.filterTransactions(); // Re-filter and render with updated data
+            },
+
+            /**
+             * Parses SBI transaction particulars to extract structured details.
+             * @param {string} particulars - The raw transaction particulars string.
+             * @param {string|number} debitAmount - The debit amount for the transaction.
+             * @param {string|number} creditAmount - The credit amount for the transaction.
+             * @returns {object} Parsed transaction details.
+             */
+            parseSBIParticulars(particulars, debitAmount, creditAmount) {
+                const parsed = {
+                    upiId: 'N/A', transactionType: 'N/A', name: 'N/A', vpa: 'N/A',
+                    description: particulars || '', category: 'Other', subCategory: 'N/A'
+                };
+                const lower = (particulars || '').toLowerCase();
+
+                // Determine transaction type (Debit/Credit)
+                if (this.parseAmount(debitAmount) > 0) parsed.transactionType = 'Debit';
+                else if (this.parseAmount(creditAmount) > 0) parsed.transactionType = 'Credit';
+
+                // Attempt to parse UPI details using regex
+                const upiMatch = particulars.match(/UPI\/(?:DR|CR)\/(\d+)\/([^\/]+)\/([^\/]+)/i);
+                if (upiMatch) {
+                    parsed.category = 'UPI Transfer';
+                    parsed.upiId = upiMatch[1] || 'N/A';
+                    parsed.name = upiMatch[2] || 'N/A';
+                    parsed.vpa = upiMatch[3] || 'N/A';
+                } else {
+                    // Categorize based on keywords
+                    for (const cat in this.categories) {
+                        if (this.categories[cat].some(key => lower.includes(key))) {
+                            parsed.category = cat;
+                            break;
+                        }
+                    }
+                }
+                // Apply sub-category mapping from the loaded map
+                if (parsed.name !== 'N/A' && this.nameSubcategoryMap[parsed.name]) {
+                    parsed.subCategory = this.nameSubcategoryMap[parsed.name];
+                }
+                return parsed;
+            },
+            
+            /**
+             * Parses a string amount (e.g., "1,000.00") into a float.
+             * @param {string|number} amount - The amount string or number.
+             * @returns {number} The parsed float amount, or 0 if invalid.
+             */
+            parseAmount(amount) {
+                return parseFloat(String(amount).replace(/,/g, '')) || 0;
+            },
+
+            /**
+             * Renders the transaction table with the given data.
+             * @param {Array<object>} data - The array of transaction objects to display.
+             */
+            renderTable(data) {
+                const tableBody = document.getElementById('sbi-transactions-table-body');
+                tableBody.innerHTML = ''; // Clear existing rows
+                if (data.length === 0) {
+                    tableBody.innerHTML = `<tr><td colspan="10" class="px-6 py-4 text-center text-sm text-gray-500">No transactions found.</td></tr>`;
+                    return;
+                }
+                tableBody.innerHTML = data.map(t => {
+                    const p = t.parsed;
+                    const typeClass = p.transactionType === 'Credit' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                    const subCatText = p.subCategory !== 'N/A' ? `<span class="px-2 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">${p.subCategory}</span>` : '-';
+                    const nameCell = p.name !== 'N/A' ? `<button onclick="SBIApp.showMapNameModal('${p.name}')" class="text-blue-600 hover:text-blue-800 font-medium">${p.name}</button>` : 'N/A';
+                    return `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 text-sm font-medium">${t.date}</td>
+                            <td class="px-6 py-4 text-sm"><span class="px-2 py-1 rounded-full text-xs font-semibold ${typeClass}">${p.category} (${p.transactionType})</span></td>
+                            <td class="px-6 py-4 text-sm">${subCatText}</td>
+                            <td class="px-6 py-4 text-sm">${p.vpa || '-'}</td>
+                            <td class="px-6 py-4 text-sm">${nameCell}</td>
+                            <td class="px-6 py-4 text-sm">${p.upiId || '-'}</td>
+                            <td class="px-6 py-4 text-sm">${p.description}</td>
+                            <td class="px-6 py-4 text-sm text-red-600 font-medium">${t.debit > 0 ? t.debit.toFixed(2) : '-'}</td>
+                            <td class="px-6 py-4 text-sm text-green-600 font-medium">${t.credit > 0 ? t.credit.toFixed(2) : '-'}</td>
+                            <td class="px-6 py-4 text-sm">${t.balance > 0 ? t.balance.toFixed(2) : '-'}</td>
+                        </tr>`;
+                }).join('');
+            },
+
+            /**
+             * Sorts the transaction table by the specified column.
+             * @param {string} key - The column key to sort by.
+             */
+            sortTable(key) {
+                // Toggle sort direction if the same column is clicked
+                if (this.currentSortColumn === key) {
+                    this.currentSortDirection = this.currentSortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    // Reset to ascending if a new column is clicked
+                    this.currentSortColumn = key;
+                    this.currentSortDirection = 'asc';
+                }
+
+                // Update sort icons visibility and direction
+                document.querySelectorAll('#app-sbi .sortable-header .sort-icon').forEach(icon => {
+                    icon.classList.remove('descending-arrow'); // Remove any existing direction class
+                    icon.style.opacity = '0.3'; // Reset opacity
+                });
+                const currentHeader = document.querySelector(`#app-sbi .sortable-header[onclick="SBIApp.sortTable('${key}')"]`);
+                const currentIcon = currentHeader ? currentHeader.querySelector('.sort-icon') : null;
+
+                if (currentIcon) {
+                    currentIcon.style.opacity = '1'; // Make current icon visible
+                    if (this.currentSortDirection === 'desc') {
+                        currentIcon.classList.add('descending-arrow'); // Add class to point down
+                    }
+                }
+
+                this.filteredTransactions.sort((a, b) => {
+                    let aVal, bVal;
+                    // Access properties directly from the standardized transaction object
+                    if (['category', 'subCategory', 'name'].includes(key)) {
+                        aVal = a.parsed[key];
+                        bVal = b.parsed[key];
+                    } else {
+                        aVal = a[key]; // Use the key directly as it's now standardized
+                        bVal = b[key];
+                    }
+
+                    if (key === 'date') {
+                        aVal = parseDateString(aVal).getTime();
+                        bVal = parseDateString(bVal).getTime();
+                    } else if (['debit', 'credit', 'balance'].includes(key)) {
+                        aVal = aVal; // Already parsed to number when added to allTransactions
+                        bVal = bVal; // Already parsed to number when added to allTransactions
+                    }
+                    const factor = this.currentSortDirection === 'asc' ? 1 : -1;
+                    if (typeof aVal === 'string') return aVal.localeCompare(bVal) * factor;
+                    return (aVal - bVal) * factor;
+                });
+                this.renderTable(this.filteredTransactions);
+            },
+            
+            /**
+             * Populates a select dropdown with unique sorted items.
+             * @param {string} selectId - The ID of the select element.
+             * @param {Array<string>} data - The array of data to populate.
+             * @param {boolean} isSub - True if it's a sub-category dropdown, for label text.
+             */
+            populateDropdown(selectId, data, isSub = false) {
+                 const select = document.getElementById(selectId);
+                 select.innerHTML = `<option value="All">All ${isSub ? 'Sub-Categories' : 'Categories'}</option>`;
+                 [...new Set(data)].sort().forEach(item => select.innerHTML += `<option value="${item}">${item}</option>`);
+            },
+            
+            /**
+             * Populates all filter dropdowns for SBI (category, sub-category, year).
+             */
+            populateAllDropdowns() {
+                // Populate Category filter
+                this.populateDropdown('sbi-filter-category', Object.keys(this.categories));
+                // Populate Sub-Category filter
+                this.populateDropdown('sbi-filter-subcategory', this.allTransactions.map(t => t.parsed.subCategory).filter(sc => sc !== 'N/A'), true);
+
+                const yearFilter = document.getElementById('sbi-filter-year');
+                yearFilter.innerHTML = '<option value="All">All Years</option>';
+                [...new Set(this.allTransactions.map(t => parseDateString(t.date).getFullYear()))]
+                    .filter(y => !isNaN(y))
+                    .sort((a, b) => a - b) // Sort years numerically
+                    .forEach(year => yearFilter.innerHTML += `<option value="${year}">${year}</option>`);
+            },
+
+            /**
+             * Populates the category dropdown in the budgeting modal.
+             */
+            populateBudgetCategoryDropdown() {
+                const dropdown = document.getElementById('sbi-budget-category');
+                dropdown.innerHTML = '<option value="">Select a category</option>';
+                // Use categories from the hardcoded list for budgeting
+                Object.keys(this.categories).sort().forEach(cat => {
+                    dropdown.innerHTML += `<option value="${cat}">${cat}</option>`;
+                });
+            },
+            
+            /**
+             * Attempts to find the correct column headers from the CSV fields.
+             * Stores the *actual CSV header names* in this.columnMap.
+             * @param {Array<string>} fields - Array of column headers from the CSV.
+             * @returns {boolean} True if all required headers are found, false otherwise.
+             */
+            findColumnHeaders(fields) {
+                const headerMap = { // Map internal standard keys to possible CSV headers
+                    'date': ['date', 'txn date', 'transaction date'],
+                    'description': ['description', 'particulars', 'narration'],
+                    'debit': ['debit', 'withdrawal', 'withdrawal amount', 'dr'],
+                    'credit': ['credit', 'deposit', 'deposit amount', 'cr'],
+                    'balance': ['balance', 'closing balance', 'current balance']
+                };
+                let allFound = true;
+                for (const internalKey in headerMap) {
+                    const foundCsvHeader = fields.find(f => headerMap[internalKey].includes(f.toLowerCase().trim()));
+                    if (foundCsvHeader) {
+                        this.columnMap[internalKey] = foundCsvHeader; // Store the actual CSV header name
+                    } else if (['date', 'description', 'debit', 'credit'].includes(internalKey)) { // These are mandatory
+                        allFound = false;
+                        console.warn(`SBI: Missing required column for ${internalKey}. Expected one of: ${headerMap[internalKey].join(', ')}`);
+                    }
+                }
+                return allFound;
+            },
+
+            /**
+             * Handles the SBI CSV file upload, parses it, and uploads new transactions to Firestore.
+             * @param {Event} event - The file input change event.
+             */
+            handleFileUpload(event) {
+                const fileInput = event.target;
+                if (!fileInput.files[0]) return;
+                
+                if (!window.db || !window.currentUserId) {
+                    this.showError("App not initialized. Please wait for Firebase to load.");
+                    return;
+                }
+
+                this.showLoading(true, `Processing ${fileInput.files[0].name}...`);
+                document.getElementById('sbi-file-name-text').innerText = fileInput.files[0].name;
+                document.getElementById('sbi-file-name').classList.remove('hidden');
+
+                Papa.parse(fileInput.files[0], {
+                    header: true, skipEmptyLines: true, worker: true,
+                    complete: async (results) => { // Made complete callback async
+                        // Always attempt to find column headers for the new file
+                        if (!this.findColumnHeaders(results.meta.fields)) {
+                            this.showLoading(false);
+                            this.showError('Could not auto-detect required columns (Date, Description, Debit, Credit). Please ensure your CSV has these columns.');
+                            fileInput.value = null; // Clear file input
+                            return;
+                        }
+
+                        const newTransactionsToUpload = [];
+                        const duplicates = [];
+                        const sbiTransactionsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/sbi_transactions`);
+
+                        for (const row of results.data) {
+                            // Skip rows if essential data is missing based on the mapped headers
+                            if (!row[this.columnMap.date] || !row[this.columnMap.description] ||
+                                (row[this.columnMap.debit] === undefined && row[this.columnMap.credit] === undefined)) {
+                                console.warn('SBI: Skipping row due to missing essential data:', row);
+                                continue;
+                            }
+
+                            // Create a unique key for duplicate detection including date, description, debit, credit, and balance
+                            const uniqueKey = `${row[this.columnMap.date]}|${row[this.columnMap.description]}|${this.parseAmount(row[this.columnMap.debit])}|${this.parseAmount(row[this.columnMap.credit])}|${this.parseAmount(row[this.columnMap.balance])}`;
+                            
+                            if (this.uniqueTransactionSet.has(uniqueKey)) {
+                                duplicates.push(row);
+                            } else {
+                                this.uniqueTransactionSet.add(uniqueKey);
+                                // Parse particulars using the current nameSubcategoryMap
+                                const parsedData = this.parseSBIParticulars(
+                                    row[this.columnMap.description],
+                                    row[this.columnMap.debit],
+                                    row[this.columnMap.credit]
+                                );
+                                newTransactionsToUpload.push({ 
+                                    // Store data using standardized internal keys
+                                    date: row[this.columnMap.date],
+                                    description: row[this.columnMap.description],
+                                    debit: this.parseAmount(row[this.columnMap.debit]),
+                                    credit: this.parseAmount(row[this.columnMap.credit]),
+                                    // Ensure balance is parsed and included, even if column might be optional
+                                    balance: this.parseAmount(row[this.columnMap.balance]), 
+                                    originalRow: row, // Keep original row for debugging if needed
+                                    parsed: parsedData,
+                                    timestamp: new Date() // Add a timestamp for ordering
+                                });
+                            }
+                        }
+
+                        // Upload new transactions to Firestore
+                        for (const transaction of newTransactionsToUpload) {
+                            try {
+                                await addDoc(sbiTransactionsRef, transaction);
+                            } catch (error) {
+                                console.error("Error adding SBI transaction to Firestore:", error);
+                                this.showError(`Failed to save some transactions to cloud: ${error.message}`);
+                            }
+                        }
+                        
+                        // Data will be re-rendered by the onSnapshot listener
+                        this.showLoading(false);
+                        this.showUploadSummaryModal(newTransactionsToUpload.length, duplicates);
+                        fileInput.value = null; // Clear file input
+                    },
+                    error: (err) => { 
+                        this.showLoading(false); 
+                        this.showError('Error parsing the file. Please check the file format or console for details.'); 
+                        console.error("PapaParse error:", err);
+                    }
+                });
+            },
+
+            /**
+             * Filters transactions based on search term and selected dropdown values.
+             */
+            filterTransactions() {
+                const term = document.getElementById('sbi-search-input').value.toLowerCase();
+                const fCat = document.getElementById('sbi-filter-category').value;
+                const fSub = document.getElementById('sbi-filter-subcategory').value;
+                const fType = document.getElementById('sbi-filter-type').value;
+                const fYear = document.getElementById('sbi-filter-year').value;
+                
+                this.filteredTransactions = this.allTransactions.filter(t => {
+                    const p = t.parsed;
+                    const d = parseDateString(t.date); // Use standardized 'date' key
+
+                    // Check if any value in the transaction or its parsed details matches the search term
+                    const matchesSearch = Object.values(t).some(v => String(v).toLowerCase().includes(term)) || 
+                                          Object.values(p).some(v => String(v).toLowerCase().includes(term));
+
+                    // Check against filter criteria
+                    const matchesCategory = (fCat === 'All' || p.category === fCat);
+                    const matchesSubCategory = (fSub === 'All' || p.subCategory === fSub);
+                    const matchesType = (fType === 'All' || p.transactionType === fType);
+                    const matchesYear = (fYear === 'All' || (!isNaN(d.getFullYear()) && d.getFullYear().toString() === fYear));
+
+                    return matchesSearch && matchesCategory && matchesSubCategory && matchesType && matchesYear;
+                });
+
+                this.renderTable(this.filteredTransactions);
+            },
+            
+            /**
+             * Clears all filters and re-renders the table.
+             */
+            clearFilters() {
+                document.getElementById('sbi-search-input').value = '';
+                document.getElementById('sbi-filter-category').value = 'All';
+                document.getElementById('sbi-filter-subcategory').value = 'All';
+                document.getElementById('sbi-filter-type').value = 'All';
+                document.getElementById('sbi-filter-year').value = 'All';
+                this.filterTransactions();
+            },
+            
+            /**
+             * Resets the SBI application to its initial state.
+             * Note: This will only clear local state, not Firestore data.
+             */
+            resetApp() {
+                this.allTransactions = []; // This will be repopulated by onSnapshot
+                this.uniqueTransactionSet.clear(); 
+                this.filteredTransactions = [];
+                // Reset columnMap to empty strings so it's re-detected on next upload
+                this.columnMap = { date: '', description: '', debit: '', credit: '', balance: '' }; 
+                document.getElementById('sbi-csv-upload').value = null;
+                // Hide relevant UI elements
+                ['sbi-file-name', 'sbi-data-container', 'sbi-filter-controls'].forEach(id => document.getElementById(id).classList.add('hidden'));
+                this.renderTable([]); // Clear table display
+            },
+            
+            /**
+             * Shows or hides the loading indicator for SBI.
+             * @param {boolean} show - True to show, false to hide.
+             * @param {string} text - The text to display in the loading indicator.
+             */
+            showLoading(show, text='Processing...') { 
+                document.getElementById('sbi-loading-text').innerText = text; 
+                document.getElementById('sbi-loading').classList.toggle('hidden', !show); 
+                // Hide error when loading starts
+                if (show) this.hideError();
+            },
+            /**
+             * Displays an error message for SBI.
+             * @param {string} message - The error message to display.
+             */
+            showError(message) { 
+                document.getElementById('sbi-error-text').innerText = message; 
+                document.getElementById('sbi-error').classList.remove('hidden'); 
+            },
+            /** Hides the error message for SBI. */
+            hideError() {
+                document.getElementById('sbi-error').classList.add('hidden');
+            },
+            /** Toggles the visibility of the SBI sidebar and its overlay. */
+            toggleSidebar() { 
+                document.getElementById('sbi-sidebar').classList.toggle('open'); 
+                document.getElementById('sbi-overlay').classList.toggle('open'); 
+            },
+
+            /** Generic function to show a modal. */
+            showModal(id) { document.getElementById(id).classList.remove('hidden'); },
+            /** Generic function to hide a modal and optionally reset its form. */
+            hideModal(id, formId) { document.getElementById(id).classList.add('hidden'); if(formId) document.getElementById(formId).reset(); },
+
+            // Specific modal functions for SBI
+            showAddCategoryModal() { this.showModal('sbi-add-category-modal'); },
+            hideAddCategoryModal() { this.hideModal('sbi-add-category-modal', 'sbi-add-category-form'); },
+            showAddSubCategoryModal() { this.showModal('sbi-add-subcategory-modal'); },
+            hideAddSubCategoryModal() { this.hideModal('sbi-add-subcategory-modal', 'sbi-add-subcategory-form'); },
+            showMapNameModal(name) { document.getElementById('sbi-name-to-map').value = name; this.populateSubCategoryDropdown(); this.showModal('sbi-map-name-modal'); },
+            hideMapNameModal() { this.hideModal('sbi-map-name-modal', 'sbi-map-name-form'); },
+            hideUploadSummaryModal() { this.hideModal('sbi-upload-summary-modal'); },
+            showAddBudgetModal() { 
+                this.populateBudgetCategoryDropdown(); 
+                this.renderExistingBudgetsList();
+                // Set current month as default
+                const today = new Date();
+                const month = (today.getMonth() + 1).toString().padStart(2, '0');
+                const year = today.getFullYear();
+                document.getElementById('sbi-budget-month').value = `${year}-${month}`;
+                this.showModal('sbi-add-budget-modal'); 
+            },
+            hideAddBudgetModal() { this.hideModal('sbi-add-budget-modal', 'sbi-add-budget-form'); },
+
+            /**
+             * Shows the SBI upload summary modal.
+             * @param {number} newCount - Number of new transactions added.
+             * @param {Array<object>} duplicates - Array of skipped duplicate transactions.
+             */
+            showUploadSummaryModal(newCount, duplicates) {
+                document.getElementById('sbi-upload-summary-text').innerText = `Added ${newCount} new transactions. Skipped ${duplicates.length} duplicates.`;
+                const listContainer = document.getElementById('sbi-duplicates-list-container');
+                if (duplicates.length > 0) {
+                    document.getElementById('sbi-duplicates-list').innerHTML = duplicates.map(d => `<li>${d[this.columnMap.date]}: ${d[this.columnMap.description].substring(0,30)}...</li>`).join('');
+                    listContainer.classList.remove('hidden');
+                } else {
+                    listContainer.classList.add('hidden');
+                }
+                this.showModal('sbi-upload-summary-modal');
+            },
+            
+            /**
+             * Populates the sub-category dropdown in SBI modals.
+             */
+            populateSubCategoryDropdown() {
+                const dropdown = document.getElementById('sbi-subcategory-dropdown');
+                dropdown.innerHTML = '<option value="">Select a sub-category</option>';
+                this.subCategories.sort().forEach(sc => dropdown.innerHTML += `<option value="${sc}">${sc}</option>`);
+            },
+
+            /**
+             * Renders the budget charts based on current transactions and budgets.
+             */
+            renderBudgetCharts() {
+                const budgetChartsContainer = document.getElementById('sbi-budget-charts');
+                budgetChartsContainer.innerHTML = ''; // Clear existing charts
+
+                if (this.budgets.length === 0) {
+                    budgetChartsContainer.innerHTML = '<p class="text-gray-500 text-sm">No budget data available. Add a budget below!</p>';
+                    return;
+                }
+
+                const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
+
+                // Group spending by category for the current month
+                const spendingByCategory = {};
+                this.allTransactions.forEach(t => {
+                    const transactionMonth = parseDateString(t.date).toISOString().slice(0, 7);
+                    if (transactionMonth === currentMonth && t.parsed.transactionType === 'Debit') {
+                        const category = t.parsed.category;
+                        spendingByCategory[category] = (spendingByCategory[category] || 0) + t.debit;
+                    }
+                });
+
+                this.budgets.forEach(budget => {
+                    if (budget.month === currentMonth) {
+                        const category = budget.category;
+                        const budgetedAmount = budget.amount;
+                        const spentAmount = spendingByCategory[category] || 0;
+                        const remaining = budgetedAmount - spentAmount;
+                        const percentageSpent = (spentAmount / budgetedAmount) * 100;
+
+                        const chartId = `sbi-budget-chart-${category.replace(/\s/g, '-')}`;
+                        const chartDiv = document.createElement('div');
+                        chartDiv.id = chartId;
+                        chartDiv.className = 'w-full';
+                        budgetChartsContainer.appendChild(chartDiv);
+
+                        const options = {
+                            chart: {
+                                type: 'radialBar',
+                                height: 150,
+                                sparkline: { enabled: true }
+                            },
+                            plotOptions: {
+                                radialBar: {
+                                    startAngle: -90,
+                                    endAngle: 90,
+                                    track: {
+                                        background: '#e7e7e7',
+                                        strokeWidth: '97%',
+                                        margin: 5, // margin is in pixels
+                                    },
+                                    dataLabels: {
+                                        name: {
+                                            show: true,
+                                            fontSize: '14px',
+                                            color: '#374151',
+                                            offsetY: -10
+                                        },
+                                        value: {
+                                            show: true,
+                                            fontSize: '16px',
+                                            color: '#1f2937',
+                                            offsetY: 8
+                                        }
+                                    }
+                                }
+                            },
+                            fill: {
+                                type: 'gradient',
+                                gradient: {
+                                    shade: 'dark',
+                                    type: 'horizontal',
+                                    shadeIntensity: 0.5,
+                                    gradientToColors: ['#8b5cf6'],
+                                    inverseColors: true,
+                                    opacityFrom: 1,
+                                    opacityTo: 1,
+                                    stops: [0, 100]
+                                }
+                            },
+                            stroke: {
+                                lineCap: 'round'
+                            },
+                            labels: [`${category} Budget`],
+                            series: [Math.min(100, percentageSpent)], // Cap at 100% for display
+                            colors: [percentageSpent > 100 ? '#ef4444' : '#6366f1'], // Red if over budget, else indigo
+                            annotations: {
+                                points: [{
+                                    x: 0,
+                                    y: 0,
+                                    marker: {
+                                        size: 0
+                                    },
+                                    label: {
+                                        borderColor: '#000',
+                                        offsetY: 0,
+                                        style: {
+                                            color: '#fff',
+                                            background: '#000',
+                                        },
+                                        text: `Spent: ₹${spentAmount.toFixed(2)} / ₹${budgetedAmount.toFixed(2)}`,
+                                    }
+                                }]
+                            },
+                            title: {
+                                text: `${category} Budget`,
+                                align: 'center',
+                                margin: 10,
+                                offsetY: 0,
+                                style: {
+                                    fontSize:  '16px',
+                                    fontWeight:  'bold',
+                                    color:  '#374151'
+                                },
+                            },
+                            subtitle: {
+                                text: `Remaining: ₹${remaining.toFixed(2)}`,
+                                align: 'center',
+                                margin: 0,
+                                offsetY: 20, // Adjust this to move it below the main title
+                                style: {
+                                    fontSize:  '12px',
+                                    fontWeight:  'normal',
+                                    color:  '#6b7280'
+                                }
+                            }
+                        };
+                        new ApexCharts(chartDiv, options).render();
+                    }
+                });
+
+                if (budgetChartsContainer.innerHTML === '') {
+                    budgetChartsContainer.innerHTML = '<p class="text-gray-500 text-sm">No active budgets for the current month.</p>';
+                }
+            },
+
+            /**
+             * Renders the list of existing budgets in the budget modal.
+             */
+            renderExistingBudgetsList() {
+                const listEl = document.getElementById('sbi-existing-budgets');
+                listEl.innerHTML = '';
+                if (this.budgets.length === 0) {
+                    listEl.innerHTML = '<li class="text-gray-500 text-sm">No budgets defined yet.</li>';
+                    return;
+                }
+                this.budgets.sort((a, b) => {
+                    // Sort by month (descending) then category (ascending)
+                    if (a.month !== b.month) return b.month.localeCompare(a.month);
+                    return a.category.localeCompare(b.category);
+                }).forEach(budget => {
+                    const listItem = document.createElement('li');
+                    listItem.className = 'flex items-center justify-between p-2 bg-gray-50 rounded-md shadow-sm';
+                    listItem.innerHTML = `
+                        <span class="text-sm font-medium text-gray-800">${budget.category} (${budget.month}): ₹${budget.amount.toFixed(2)}</span>
+                        <button type="button" onclick="SBIApp.deleteBudget('${budget.id}')" class="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                        </button>
+                    `;
+                    listEl.appendChild(listItem);
+                });
+            },
+
+            /**
+             * Adds or updates a budget in Firestore.
+             * @param {string} month - The month for the budget (YYYY-MM).
+             * @param {string} category - The category for the budget.
+             * @param {number} amount - The budgeted amount.
+             */
+            async saveBudget(month, category, amount) {
+                if (!window.db || !window.currentUserId || !window.currentAppId) {
+                    this.showError("App not initialized. Cannot save budget.");
+                    return;
+                }
+                try {
+                    const budgetsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/budgets`);
+                    // Check if a budget for this month and category already exists
+                    const existingBudget = this.budgets.find(b => b.month === month && b.category === category);
+
+                    if (existingBudget) {
+                        const docRef = doc(budgetsRef, existingBudget.id);
+                        await updateDoc(docRef, { amount: amount, timestamp: new Date() });
+                        console.log("Budget updated:", { month, category, amount });
+                    } else {
+                        await addDoc(budgetsRef, { month, category, amount, timestamp: new Date() });
+                        console.log("Budget added:", { month, category, amount });
+                    }
+                    this.hideAddBudgetModal();
+                } catch (error) {
+                    console.error("Error saving budget to Firestore:", error);
+                    this.showError(`Failed to save budget: ${error.message}`);
+                }
+            },
+
+            /**
+             * Deletes a budget from Firestore.
+             * @param {string} budgetId - The ID of the budget document to delete.
+             */
+            async deleteBudget(budgetId) {
+                if (!window.db || !window.currentUserId || !window.currentAppId) {
+                    this.showError("App not initialized. Cannot delete budget.");
+                    return;
+                }
+                try {
+                    const budgetsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/budgets`);
+                    await deleteDoc(doc(budgetsRef, budgetId));
+                    console.log("Budget deleted:", budgetId);
+                } catch (error) {
+                    console.error("Error deleting budget from Firestore:", error);
+                    this.showError(`Failed to delete budget: ${error.message}`);
+                }
+            }
+        };
+
+        // Initialize Lucide icons and attach event listeners when the window loads
+        window.addEventListener('load', () => {
+            lucide.createIcons();
+            
+            // Event Listeners for IPBP App
+            document.getElementById('ipbp-add-category-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('ipbp-new-category-name').value;
+                const keywords = document.getElementById('ipbp-new-category-keywords').value.split(',').map(k => k.trim().toLowerCase()).filter(k => k); // Filter out empty strings
+                if (name && keywords.length) {
+                    // Update local categories (will be used for re-parsing)
+                    IPBPApp.categories[name] = keywords;
+                    // Re-parse all transactions to apply new categories locally
+                    IPBPApp.reapplyMappingsAndFilter(); // This will re-parse and re-filter
+                    IPBPApp.populateAllDropdowns();
+                    IPBPApp.hideAddCategoryModal();
+                    // Note: Categories themselves are not stored in Firestore in this implementation,
+                    // only sub-categories are shared. If categories need to be persisted,
+                    // you would add them to a Firestore collection here.
+                } else {
+                    console.error('Please enter a category name and at least one keyword.');
+                }
+            });
+
+            document.getElementById('ipbp-add-subcategory-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('ipbp-new-subcategory-name').value.trim();
+                if (name && !IPBPApp.subCategories.includes(name)) {
+                    if (!window.db || !window.currentAppId) {
+                        IPBPApp.showError("App not initialized. Cannot save sub-category.");
+                        return;
+                    }
+                    try {
+                        const subCategoriesRef = collection(window.db, `artifacts/${window.currentAppId}/public/data/sub_categories`);
+                        await addDoc(subCategoriesRef, { name: name, timestamp: new Date() });
+                        IPBPApp.hideAddSubCategoryModal();
+                    } catch (error) {
+                        console.error("Error adding sub-category to Firestore:", error);
+                        IPBPApp.showError(`Failed to add sub-category: ${error.message}`);
+                    }
+                } else {
+                    console.error('Please enter a unique sub-category name.');
+                }
+            });
+
+            document.getElementById('ipbp-map-vpa-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const vpa = document.getElementById('ipbp-vpa-to-map').value;
+                const subCategory = document.getElementById('ipbp-subcategory-dropdown').value;
+                if (vpa && subCategory) {
+                    if (!window.db || !window.currentUserId || !window.currentAppId) {
+                        IPBPApp.showError("App not initialized. Cannot map VPA.");
+                        return;
+                    }
+                    try {
+                        const vpaMappingsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/ipbp_vpa_subcategory_mappings`);
+                        // Check if mapping exists, update or add
+                        const q = query(vpaMappingsRef, where("vpa", "==", vpa));
+                        const querySnapshot = await getDocs(q);
+                        if (!querySnapshot.empty) {
+                            // Update existing mapping
+                            const docRef = doc(vpaMappingsRef, querySnapshot.docs[0].id);
+                            await updateDoc(docRef, { subCategory: subCategory, timestamp: new Date() });
+                        } else {
+                            // Add new mapping
+                            await addDoc(vpaMappingsRef, { vpa: vpa, subCategory: subCategory, timestamp: new Date() });
+                        }
+                        IPBPApp.hideMapVpaModal();
+                    } catch (error) {
+                        console.error("Error mapping VPA to sub-category in Firestore:", error);
+                        IPBPApp.showError(`Failed to map VPA: ${error.message}`);
+                    }
+                } else {
+                    console.error('Please select a sub-category to map the VPA.');
+                }
+            });
+            
+            // Event Listeners for SBI App
+            document.getElementById('sbi-add-category-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('sbi-new-category-name').value;
+                const keywords = document.getElementById('sbi-new-category-keywords').value.split(',').map(k => k.trim().toLowerCase()).filter(k => k);
+                if (name && keywords.length) {
+                    // Update local categories (will be used for re-parsing)
+                    SBIApp.categories[name] = keywords;
+                    // Re-parse all transactions to apply new categories locally
+                    SBIApp.reapplyMappingsAndFilter(); // This will re-parse and re-filter
+                    SBIApp.populateAllDropdowns();
+                    SBIApp.hideAddCategoryModal();
+                    // Note: Categories themselves are not stored in Firestore in this implementation.
+                } else {
+                    console.error('Please enter a category name and at least one keyword.');
+                }
+            });
+
+            document.getElementById('sbi-add-subcategory-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('sbi-new-subcategory-name').value.trim();
+                if (name && !SBIApp.subCategories.includes(name)) {
+                    if (!window.db || !window.currentAppId) {
+                        SBIApp.showError("App not initialized. Cannot save sub-category.");
+                        return;
+                    }
+                    try {
+                        const subCategoriesRef = collection(window.db, `artifacts/${window.currentAppId}/public/data/sub_categories`);
+                        await addDoc(subCategoriesRef, { name: name, timestamp: new Date() });
+                        SBIApp.hideAddSubCategoryModal();
+                    } catch (error) {
+                        console.error("Error adding sub-category to Firestore:", error);
+                        SBIApp.showError(`Failed to add sub-category: ${error.message}`);
+                    }
+                } else {
+                    console.error('Please enter a unique sub-category name.');
+                }
+            });
+
+            document.getElementById('sbi-map-name-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('sbi-name-to-map').value;
+                const subCategory = document.getElementById('sbi-subcategory-dropdown').value;
+                if (name && subCategory) {
+                    if (!window.db || !window.currentUserId || !window.currentAppId) {
+                        SBIApp.showError("App not initialized. Cannot map name.");
+                        return;
+                    }
+                    try {
+                        const nameMappingsRef = collection(window.db, `artifacts/${window.currentAppId}/users/${window.currentUserId}/sbi_name_subcategory_mappings`);
+                        // Check if mapping exists, update or add
+                        const q = query(nameMappingsRef, where("name", "==", name));
+                        const querySnapshot = await getDocs(q);
+                        if (!querySnapshot.empty) {
+                            // Update existing mapping
+                            const docRef = doc(nameMappingsRef, querySnapshot.docs[0].id);
+                            await updateDoc(docRef, { subCategory: subCategory, timestamp: new Date() });
+                        } else {
+                            // Add new mapping
+                            await addDoc(nameMappingsRef, { name: name, subCategory: subCategory, timestamp: new Date() });
+                        }
+                        SBIApp.hideMapNameModal();
+                    } catch (error) {
+                        console.error("Error mapping name to sub-category in Firestore:", error);
+                        SBIApp.showError(`Failed to map name: ${error.message}`);
+                    }
+                } else {
+                    console.error('Please select a sub-category to map the name.');
+                }
+            });
+
+            document.getElementById('sbi-add-budget-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const month = document.getElementById('sbi-budget-month').value; // YYYY-MM
+                const category = document.getElementById('sbi-budget-category').value;
+                const amount = parseFloat(document.getElementById('sbi-budget-amount').value);
+
+                if (month && category && !isNaN(amount) && amount >= 0) {
+                    await SBIApp.saveBudget(month, category, amount);
+                } else {
+                    SBIApp.showError('Please fill in all budget fields correctly.');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
